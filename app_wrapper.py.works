@@ -1,0 +1,90 @@
+import streamlit as st
+import io
+import web_scraper
+
+def normalize_url(url):
+    """Ensure the URL begins with 'https://'. Replace 'http://' with 'https://' or add the prefix if missing."""
+    url = url.strip()
+    if not url:
+        return None
+    if url.startswith("http://"):
+        url = "https://" + url[len("http://"):]
+    elif not url.startswith("https://"):
+        url = "https://" + url
+    return url
+
+def generate_filename(url):
+    """
+    Generate a CSV filename based on the URL.
+    For the URLs, attempt to extract the article title (removing underscores) and then take
+    the first 10 characters. Otherwise, use the first 8 characters of an MD5 hash.
+    The final filename (including the .csv extension) will be less than 15 characters.
+    """
+    import re, hashlib
+    match = re.search(r'/wiki/([^/?#]+)', url)
+    if match:
+        title = match.group(1).replace('_', '')
+        filename = title[:10]  # truncate to first 10 characters
+    else:
+        filename = hashlib.md5(url.encode()).hexdigest()[:8]
+    return filename + ".csv"
+
+def main():
+    st.title("General Web Scraper")
+    st.write("Enter URLs manually or upload a plain text file with URLs (one URL per line).")
+    
+    # File uploader for text file input
+    uploaded_file = st.file_uploader("Upload a plain text file with URLs", type=["txt"])
+    urls = []
+    
+    if uploaded_file is not None:
+        try:
+            # In Streamlit 1.29, file_uploader returns a BytesIO so use read() and decode
+            file_content = io.StringIO(uploaded_file.read().decode("utf-8"))
+        except Exception:
+            st.error("Error reading the file. Please make sure it's a valid text file.")
+            st.stop()
+        
+        file_urls = [line.strip() for line in file_content if line.strip()]
+        # Enforce a maximum of 100 entries from a file
+        if len(file_urls) > 100:
+            st.error("Only 100 entries may be processed at a time. Please attach a file with 100 or fewer URLs or close.")
+            st.stop()
+        urls.extend(file_urls)
+    else:
+        # Manual URL entry area (one URL per line)
+        manual_input = st.text_area("Enter one Wikipedia URL per line (press Enter after each URL):", "")
+        if manual_input:
+            manual_urls = [line.strip() for line in manual_input.splitlines() if line.strip()]
+            if len(manual_urls) > 9:
+                st.error("For more than 9 entries, please attach a plain text file with the full list.")
+                st.stop()
+            urls.extend(manual_urls)
+    
+    if urls:
+        # Normalize URLs (prefixing with 'https://' as needed)
+        normalized_urls = []
+        for url in urls:
+            norm_url = normalize_url(url)
+            if norm_url:
+                normalized_urls.append(norm_url)
+        
+        st.subheader("Normalized URLs:")
+        for url in normalized_urls:
+            st.write(url)
+        
+        st.subheader("Processing URLs...")
+        for url in normalized_urls:
+            filename = generate_filename(url)
+            st.write(f"Processing {url} ...")
+            # Extract the full article content
+            result = web_scraper.extract_article_content(url)
+            web_scraper.save_to_csv(result, filename)
+            st.success(f"Results saved to {filename}")
+
+def run_app():
+    """Function to run the Streamlit app, used by main.py."""
+    main()
+
+if __name__ == "__main__":
+    run_app()

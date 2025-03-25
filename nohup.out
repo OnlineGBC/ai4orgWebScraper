@@ -1,0 +1,56 @@
+
+  You can now view your Streamlit app in your browser.
+
+  URL: https://0.0.0.0:8501
+
+2025-03-25 03:28:44.880 Uncaught exception in write_error
+Traceback (most recent call last):
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 1790, in _execute
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 2688, in get
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 2900, in validate_absolute_path
+tornado.web.HTTPError: HTTP 404: Not Found
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 1298, in send_error
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/streamlit/web/server/routes.py", line 85, in write_error
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 944, in render
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 1090, in render_string
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/template.py", line 446, in load
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/template.py", line 476, in _create_template
+FileNotFoundError: [Errno 2] No such file or directory: '/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/streamlit/static/index.html'
+2025-03-25 03:28:48.272 Uncaught exception in write_error
+Traceback (most recent call last):
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 1790, in _execute
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 2688, in get
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 2900, in validate_absolute_path
+tornado.web.HTTPError: HTTP 404: Not Found
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 1298, in send_error
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/streamlit/web/server/routes.py", line 85, in write_error
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 944, in render
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 1090, in render_string
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/template.py", line 446, in load
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/template.py", line 476, in _create_template
+FileNotFoundError: [Errno 2] No such file or directory: '/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/streamlit/static/index.html'
+2025-03-25 03:31:30.103 Uncaught exception in write_error
+Traceback (most recent call last):
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 1790, in _execute
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 2688, in get
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 2900, in validate_absolute_path
+tornado.web.HTTPError: HTTP 404: Not Found
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 1298, in send_error
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/streamlit/web/server/routes.py", line 85, in write_error
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 944, in render
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/web.py", line 1090, in render_string
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/template.py", line 446, in load
+  File "/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/tornado/template.py", line 476, in _create_template
+FileNotFoundError: [Errno 2] No such file or directory: '/home/developer/ai4orgWebScraper/ai4orgWebScraper/lib/python3.12/site-packages/streamlit/static/index.html'
