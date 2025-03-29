@@ -6,7 +6,6 @@ import string
 import web_scraper
 import os
 from urllib.parse import urljoin, urlparse
-from docx import Document
 import pandas as pd
 import openai
 from datetime import datetime
@@ -18,12 +17,8 @@ def sanitize_for_xml(text):
         r'[^\x09\x0A\x0D\x20-\x7E\x85\xA0-\uD7FF\uE000-\uFFFD]', '', text
     )
 
-def generate_random_filename(url):
-    base_name = urlparse(url).hostname.replace(".", "_")
-    random_suffix = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
-    return f"{base_name}_{random_suffix}"
-
 def format_recursive_data_for_word(data, indent=0):
+    # We reuse this function name, but it's just for formatting text now.
     text = ""
     prefix = "    " * indent
     if isinstance(data, dict):
@@ -37,69 +32,10 @@ def format_recursive_data_for_word(data, indent=0):
                 text += format_recursive_data_for_word(sub, indent+1)
     return text
 
-def flatten_recursive_data(data, depth=0, rows=None):
-    if rows is None:
-        rows = []
-    if isinstance(data, dict):
-        rows.append({
-            "URL": data.get("URL", ""),
-            "Title": data.get("Title", ""),
-            "Headings": str(data.get("Headings", {})),
-            "Content": data.get("FullContent", ""),
-            "Depth": depth
-        })
-        if data.get("sub_pages"):
-            for sub in data["sub_pages"]:
-                flatten_recursive_data(sub, depth+1, rows)
-    return rows
-
-def save_to_word(results, url):
-    directory = "temp_uploaded_files"
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    document = Document()
-    document.add_heading('Extraction Results', level=1)
-    sanitized_url = sanitize_for_xml(url)
-    document.add_paragraph(f"Source URL: {sanitized_url}")
-    sanitized_results = sanitize_for_xml(results)
-    if sanitized_results != results:
-        print(f"⚠️ Invalid XML characters detected and removed for URL: {url}")
-    document.add_paragraph(sanitized_results)
-    filename = generate_random_filename(url) + ".docx"
-    save_path = os.path.join(directory, filename)
-    document.save(save_path)
-    return save_path
-
-def save_to_excel(rows, url):
-    directory = "temp_uploaded_files"
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    sanitized_rows = []
-    for row in rows:
-        sanitized_row = {key: sanitize_for_xml(str(value)) for key, value in row.items()}
-        sanitized_rows.append(sanitized_row)
-    df = pd.DataFrame(sanitized_rows)
-    filename = generate_random_filename(url) + ".xlsx"
-    save_path = os.path.join(directory, filename)
-    df.to_excel(save_path, index=False)
-    return save_path
-
-def save_to_text(text, url):
-    """Save text content to a .txt file."""
-    directory = "temp_uploaded_files"
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    sanitized_text = sanitize_for_xml(text)
-    filename = generate_random_filename(url) + ".txt"
-    save_path = os.path.join(directory, filename)
-    with open(save_path, "w", encoding="utf-8") as f:
-        f.write(sanitized_text)
-    return save_path
-
 def collect_urls(data):
     """
     Recursively collect all URLs from the nested data structure.
-    Each node is a dictionary with a "URL" key and an optional "sub_pages" list.
+    Each node is a dictionary with a "URL" key and optionally a "sub_pages" list.
     """
     urls = []
     if isinstance(data, dict):
@@ -110,11 +46,6 @@ def collect_urls(data):
             for sub in data["sub_pages"]:
                 urls.extend(collect_urls(sub))
     return urls
-
-@st.cache_data(show_spinner="Performing recursive extraction (depth = 3)...", ttl=3600, hash_funcs={tuple: lambda x: hash(x)})
-def cached_recursive_extract_all(urls_tuple, max_depth=3):
-    urls_list = list(urls_tuple)
-    return web_scraper.recursive_extract_all(urls_list, max_depth=max_depth)
 
 def sanitize_recursive_data(data):
     if isinstance(data, dict):
@@ -127,8 +58,33 @@ def sanitize_recursive_data(data):
     else:
         return data
 
+def save_to_text(text_content, domain_url):
+    """
+    Save text content to a .txt file based on a synthetic domain URL.
+    """
+    directory = "temp_uploaded_files"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    sanitized_text = sanitize_for_xml(text_content)
+    base_name = urlparse(domain_url).hostname.replace(".", "_")
+    random_suffix = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
+    filename = f"{base_name}_{random_suffix}.txt"
+    save_path = os.path.join(directory, filename)
+    with open(save_path, "w", encoding="utf-8") as f:
+        f.write(sanitized_text)
+    return save_path
+
+@st.cache_data(show_spinner="Performing recursive extraction (depth = 3)...", ttl=3600, hash_funcs={tuple: lambda x: hash(x)})
+def cached_recursive_extract_all(urls_tuple, max_depth=3):
+    """
+    Uses web_scraper.recursive_extract_all to recursively gather data
+    for each URL in the list, up to the specified depth.
+    """
+    urls_list = list(urls_tuple)
+    return web_scraper.recursive_extract_all(urls_list, max_depth=max_depth)
+
 def run_app():
-    st.title("General Web Scraper")
+    st.title("Domain-Specific Text Logs Only")
     st.write("Enter URLs manually or upload a plain text file with URLs (one URL per line).")
 
     user_prompt = st.text_area(
@@ -144,62 +100,54 @@ def run_app():
         file_content = io.StringIO(uploaded_file.read().decode("utf-8"))
         urls = [line.strip() for line in file_content if line.strip()]
     else:
-        manual_input = st.text_area("Enter one URL per line (press Enter after each URL):", "")
+        manual_input = st.text_area("Enter one URL per line:", "")
         urls = [line.strip() for line in manual_input.splitlines() if line.strip()]
 
+    # Normalize URLs to ensure they have a scheme (http/https).
     normalized_urls = [url if urlparse(url).scheme else f"https://{url}" for url in urls]
 
     if normalized_urls:
-        # Use AI analysis and recursive extraction
+        # Use AI analysis to figure out a prioritized list.
         prioritized_list, _ = web_scraper.ai_assisted_robots_analysis(normalized_urls, user_prompt)
+
+        # Check if we already have the data in st.session_state.
         if "recursive_data" not in st.session_state:
             with st.spinner("Performing recursive extraction (depth = 3)..."):
                 st.session_state.recursive_data = cached_recursive_extract_all(tuple(prioritized_list))
+
         recursive_data = st.session_state.recursive_data
-        
-        # Group results by domain so that each domain's data is kept together
+
+        # Group results by domain
         domain_results = {}
         for url in prioritized_list:
-            result = recursive_data.get(url)
-            if result:
+            if url in recursive_data:
                 domain = urlparse(url).netloc
-                domain_results.setdefault(domain, []).append(result)
-        
+                domain_results.setdefault(domain, []).append(recursive_data[url])
+
         if domain_results:
-            st.subheader("Download Files Per Domain")
+            st.subheader("Download Text File Per Domain")
             for domain, results_list in domain_results.items():
-                # Combine results for the same domain
-                word_contents = "\n\n".join([format_recursive_data_for_word(res) for res in results_list])
-                excel_rows = []
+                # Combine the results for this domain into one text block
+                text_content = ""
                 for res in results_list:
-                    excel_rows.extend(flatten_recursive_data(res))
-                text_contents = word_contents  # Using the same content for text output
-                
-                # Use a synthetic URL for the domain to drive the naming algorithm
-                domain_url = "https://" + domain
-                word_filepath = save_to_word(word_contents, domain_url)
-                excel_filepath = save_to_excel(excel_rows, domain_url)
-                text_filepath = save_to_text(text_contents, domain_url)
-                
+                    # sanitize and format
+                    text_content += format_recursive_data_for_word(res) + "\n\n"
+
+                # Assign the content to a variable named <domain>_url_log_<timestamp>
+                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                var_domain = domain.replace(".", "_")
+                var_name = f"{var_domain}_url_log_{timestamp}"
+                globals()[var_name] = text_content
+
+                # Save to a text file
+                domain_url = f"https://{domain}"
+                text_filepath = save_to_text(text_content, domain_url)
+
                 st.markdown(f"**Files for {domain}**")
-                with open(word_filepath, "rb") as f_word:
-                    st.download_button(
-                        f"Download Word File for {domain}",
-                        f_word,
-                        os.path.basename(word_filepath),
-                        key=f"download_word_{domain}"
-                    )
-                with open(excel_filepath, "rb") as f_excel:
-                    st.download_button(
-                        f"Download Excel File for {domain}",
-                        f_excel,
-                        os.path.basename(excel_filepath),
-                        key=f"download_excel_{domain}"
-                    )
-                with open(text_filepath, "rb") as f_text:
+                with open(text_filepath, "rb") as f_txt:
                     st.download_button(
                         f"Download Text File for {domain}",
-                        f_text,
+                        f_txt,
                         os.path.basename(text_filepath),
                         key=f"download_text_{domain}"
                     )
