@@ -55,7 +55,7 @@ ai4orgWebScraper/
 ENV/
 env.bak/
 venv.bak/
-
+nohup.out
 
 # Pyenv / uv Stuff
 .python-version

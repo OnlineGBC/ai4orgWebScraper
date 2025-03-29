@@ -1,4 +1,4 @@
-import requests
+import httpx
 import urllib.parse
 
 def get_random_wikipedia_urls(n=200):
@@ -8,11 +8,11 @@ def get_random_wikipedia_urls(n=200):
         params = {
             "action": "query",
             "list": "random",
-            "rnnamespace": 0,  # Main article namespace
-            "rnlimit": 10,     # 10 per request (limit for non-bot requests)
+            "rnnamespace": 0,     # Main article namespace
+            "rnlimit": 10,        # 10 per request
             "format": "json"
         }
-        response = requests.get("https://en.wikipedia.org/w/api.php", params=params)
+        response = httpx.get("https://en.wikipedia.org/w/api.php", params=params)
         response.raise_for_status()
         data = response.json()
         for page in data["query"]["random"]:

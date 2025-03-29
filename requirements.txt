@@ -1,11 +1,22 @@
-streamlit 
-requests 
-beautifulsoup4 
-lxml 
-pandas 
-plotly 
-nltk
-selenium
-webdriver-manager
-openai
+# Also requires system-level (for example sudo apt install for Ubuntu):
+#   tesseract-ocr
+#   tesseract-ocr-all (or individual language packs)
 
+# Actual Python dependencies are below:
+
+beautifulsoup4 
+httpx
+lxml 
+nltk
+openai>=1.6.0
+openpyxl
+pandas 
+pillow
+plotly 
+pytesseract
+python-docx
+python-dotenv
+requests 
+selenium
+streamlit 
+webdriver-manager

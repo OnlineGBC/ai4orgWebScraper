@@ -1,7 +1,8 @@
 import streamlit as st
-import os
 import sys
 import warnings
+import os
+from config import OPENAI_CLIENT
 
 # Suppress all warnings globally
 warnings.simplefilter("ignore")

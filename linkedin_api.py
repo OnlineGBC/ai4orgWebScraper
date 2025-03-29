@@ -1,5 +1,5 @@
 import os
-import requests
+import httpx
 import json
 from datetime import datetime
 import time
@@ -11,7 +11,6 @@ class LinkedInAPI:
     """
     
     def __init__(self):
-        """Initialize the LinkedIn API client with credentials from environment variables."""
         self.client_id = os.environ.get('LINKEDIN_CLIENT_ID')
         self.client_secret = os.environ.get('LINKEDIN_CLIENT_SECRET')
         self.redirect_uri = os.environ.get('LINKEDIN_REDIRECT_URI')
@@ -20,64 +19,46 @@ class LinkedInAPI:
         self.base_url = "https://api.linkedin.com/v2"
         self.job_search_url = f"{self.base_url}/jobSearch"
         
-        # Check if credentials are available
         self.is_configured = self._check_configuration()
         
-        # Rate limiting parameters
         self.request_count = 0
         self.last_request_time = 0
-        self.rate_limit_per_minute = 60  # Adjust based on your API tier
+        self.rate_limit_per_minute = 60
         
-        # Mock data flag - set to True to use mock responses instead of real API calls
         self.use_mock_data = True
+        self.session = httpx.Client()  # Using httpx for synchronous requests
     
     def _check_configuration(self):
-        """Check if all required credentials are available."""
         required_vars = ['LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET', 
                          'LINKEDIN_REDIRECT_URI', 'LINKEDIN_ACCESS_TOKEN']
-        
         missing_vars = [var for var in required_vars if not os.environ.get(var)]
-        
         if missing_vars:
             print(f"Missing environment variables: {', '.join(missing_vars)}")
             return False
         return True
     
     def _handle_rate_limiting(self):
-        """Implement rate limiting to avoid exceeding API quotas."""
         current_time = time.time()
         time_diff = current_time - self.last_request_time
-        
-        # If less than a minute has passed since first request in this minute
         if time_diff < 60 and self.request_count >= self.rate_limit_per_minute:
-            # Sleep until a minute has passed
             sleep_time = 60 - time_diff
             print(f"Rate limit reached. Sleeping for {sleep_time:.2f} seconds")
             time.sleep(sleep_time)
-            # Reset counter
             self.request_count = 0
             self.last_request_time = time.time()
-        
-        # If more than a minute has passed, reset counter
         elif time_diff >= 60:
             self.request_count = 0
             self.last_request_time = current_time
-        
-        # Increment request counter
         self.request_count += 1
     
     def _get_mock_job_search_response(self, keywords=None, location=None, count=25):
-        """Generate mock job search response data"""
-        current_time = int(time.time() * 1000)  # Current time in milliseconds
-        
-        # Create mock job listings based on search parameters
+        current_time = int(time.time() * 1000)
         job_listings = []
-        for i in range(min(count, 25)):  # Limit to requested count or 25 max
+        for i in range(min(count, 25)):
             job_id = f"mock-job-{i+1}"
             job_title = f"{keywords if keywords else 'Software Engineer'} {i+1}"
             company_name = f"Mock Company {(i % 5) + 1}"
             job_location = location if location else "Remote"
-            
             job_listing = {
                 "id": job_id,
                 "title": job_title,
@@ -87,39 +68,33 @@ class LinkedInAPI:
                     "country": "US",
                     "city": job_location.split(",")[0] if "," in job_location else job_location
                 },
-                "listedAt": current_time - (i * 86400000),  # Subtract days in milliseconds
+                "listedAt": current_time - (i * 86400000),
                 "applyUrl": f"https://www.linkedin.com/jobs/view/{job_id}",
                 "description": f"This is a mock job description for {job_title} at {company_name}. " +
-                              f"The position is located in {job_location} and requires skills in programming, " +
-                              f"communication, and problem-solving.",
+                               f"The position is located in {job_location} and requires skills in programming, " +
+                               f"communication, and problem-solving.",
                 "employmentStatus": "FULL_TIME",
                 "experienceLevel": "MID_SENIOR",
                 "industries": ["Technology", "Software Development"]
             }
             job_listings.append(job_listing)
-        
-        # Create the mock response structure
         mock_response = {
             "elements": job_listings,
             "paging": {
                 "count": len(job_listings),
                 "start": 0,
-                "total": 250  # Mock total number of results
+                "total": 250
             },
             "metadata": {
                 "searchId": f"mock-search-{int(time.time())}",
                 "status": "COMPLETE"
             }
         }
-        
         return mock_response
     
     def _get_mock_job_details(self, job_id):
-        """Generate mock job details response"""
         job_number = job_id.split("-")[-1] if "-" in job_id else "1"
-        current_time = int(time.time() * 1000)  # Current time in milliseconds
-        
-        # Create detailed mock job data
+        current_time = int(time.time() * 1000)
         mock_job_details = {
             "id": job_id,
             "title": f"Software Engineer {job_number}",
@@ -171,14 +146,10 @@ class LinkedInAPI:
             },
             "skills": ["Python", "JavaScript", "SQL", "AWS", "Docker"]
         }
-        
         return mock_job_details
     
     def _get_mock_company_details(self, company_id):
-        """Generate mock company details response"""
         company_number = company_id.split("-")[-1] if "-" in company_id else "1"
-        
-        # Create mock company data
         mock_company = {
             "id": company_id,
             "name": f"Mock Company {company_number}",
@@ -196,12 +167,9 @@ class LinkedInAPI:
             "website": f"https://www.mockcompany{company_number}.com",
             "logoUrl": "https://media.licdn.com/dms/image/mock_company_logo.png"
         }
-        
         return mock_company
     
     def _get_mock_user_profile(self):
-        """Generate mock user profile response"""
-        # Create mock user profile data
         mock_profile = {
             "id": "mock-user-123",
             "firstName": "John",
@@ -239,21 +207,16 @@ class LinkedInAPI:
             ],
             "skills": ["Python", "JavaScript", "React", "Node.js", "AWS", "Docker", "Machine Learning"]
         }
-        
         return mock_profile
     
     def _make_request(self, endpoint, params=None, method="GET"):
-        """Make a request to the LinkedIn API with rate limiting."""
         if not self.is_configured:
             return {
                 "success": False,
                 "message": "LinkedIn API not configured. Please set environment variables.",
                 "data": None
             }
-        
-        # Use mock data if enabled
         if self.use_mock_data:
-            # Determine which mock response to return based on the endpoint
             if endpoint == "jobSearch":
                 mock_data = self._get_mock_job_search_response(
                     keywords=params.get("keywords") if params else None,
@@ -289,7 +252,6 @@ class LinkedInAPI:
                     "data": mock_data
                 }
             elif endpoint == "jobRecommendations":
-                # Return mock job recommendations (similar to job search)
                 mock_data = self._get_mock_job_search_response(
                     keywords="recommended",
                     count=params.get("count", 25) if params else 25
@@ -300,15 +262,13 @@ class LinkedInAPI:
                     "data": mock_data
                 }
             elif endpoint == "jobSaves":
-                if method == "POST":
-                    # Mock saving a job
+                if method.upper() == "POST":
                     return {
                         "success": True,
                         "message": "Job saved successfully (mock data)",
                         "data": {"id": params.get("jobId"), "saved": True}
                     }
                 else:
-                    # Mock getting saved jobs
                     mock_data = self._get_mock_job_search_response(
                         keywords="saved",
                         count=params.get("count", 25) if params else 25
@@ -319,301 +279,64 @@ class LinkedInAPI:
                         "data": mock_data
                     }
             else:
-                # Generic mock response for other endpoints
                 return {
                     "success": True,
                     "message": f"Request successful for endpoint {endpoint} (mock data)",
                     "data": {"message": "This is mock data for an unspecified endpoint"}
                 }
         
-        # If not using mock data, proceed with actual API request
-        # Handle rate limiting
         self._handle_rate_limiting()
-        
-        # Prepare headers with access token
         headers = {
             "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json",
-            "X-Restli-Protocol-Version": "2.0.0"
+            "Content-Type": "application/json"
         }
-        
-        url = f"{self.base_url}/{endpoint}"
-        
         try:
-            if method == "GET":
-                response = requests.get(url, headers=headers, params=params)
-            elif method == "POST":
-                response = requests.post(url, headers=headers, json=params)
+            url = f"{self.base_url}/{endpoint}"
+            if method.upper() == "GET":
+                response = self.session.get(url, params=params, headers=headers, timeout=10)
+            elif method.upper() == "POST":
+                response = self.session.post(url, json=params, headers=headers, timeout=10)
             else:
-                return {
-                    "success": False,
-                    "message": f"Unsupported method: {method}",
-                    "data": None
-                }
-            
-            # Check for successful response
+                response = self.session.request(method.upper(), url, json=params, headers=headers, timeout=10)
             response.raise_for_status()
-            
             return {
                 "success": True,
                 "message": "Request successful",
                 "data": response.json()
             }
-        
-        except requests.exceptions.HTTPError as e:
-            status_code = e.response.status_code
-            error_message = f"HTTP Error: {status_code}"
-            
-            # Handle specific error codes
-            if status_code == 401:
-                error_message = "Authentication failed. Please check your access token."
-            elif status_code == 403:
-                error_message = "Permission denied. Your API key may not have access to this endpoint."
-            elif status_code == 429:
-                error_message = "Rate limit exceeded. Please try again later."
-            
+        except Exception as e:
             return {
                 "success": False,
-                "message": error_message,
-                "data": None
-            }
-        
-        except requests.exceptions.RequestException as e:
-            return {
-                "success": False,
-                "message": f"Request failed: {str(e)}",
-                "data": None
-            }
-        
-        except json.JSONDecodeError:
-            return {
-                "success": False,
-                "message": "Failed to parse response JSON",
+                "message": f"Request error: {str(e)}",
                 "data": None
             }
     
-    def search_jobs(self, keywords=None, location=None, job_titles=None, 
-                   company_names=None, experience_levels=None, job_types=None,
-                   industries=None, distance=None, sort_by="RELEVANCE", 
-                   start=0, count=25):
-        """
-        Search for jobs using LinkedIn's Job Search API.
-        
-        Parameters:
-        - keywords: Search keywords
-        - location: Location name or ID
-        - job_titles: List of job titles to filter by
-        - company_names: List of company names to filter by
-        - experience_levels: List of experience levels (ENTRY_LEVEL, MID_SENIOR, etc.)
-        - job_types: List of job types (FULL_TIME, PART_TIME, CONTRACT, etc.)
-        - industries: List of industry IDs
-        - distance: Distance in miles from location
-        - sort_by: How to sort results (RELEVANCE, RECENT)
-        - start: Starting index for pagination
-        - count: Number of results to return (max 100)
-        
-        Returns:
-        - Dictionary with search results
-        """
-        # Build query parameters
-        params = {
-            "start": start,
-            "count": min(count, 100),  # LinkedIn API typically limits to 100 per request
-            "sortBy": sort_by
-        }
-        
-        # Add optional parameters if provided
-        if keywords:
-            params["keywords"] = keywords
-        
-        if location:
-            params["location"] = location
-        
-        if job_titles and isinstance(job_titles, list):
-            params["jobTitles"] = ",".join(job_titles)
-        
-        if company_names and isinstance(company_names, list):
-            params["companyNames"] = ",".join(company_names)
-        
-        if experience_levels and isinstance(experience_levels, list):
-            params["experienceLevels"] = ",".join(experience_levels)
-        
-        if job_types and isinstance(job_types, list):
-            params["jobTypes"] = ",".join(job_types)
-        
-        if industries and isinstance(industries, list):
-            params["industries"] = ",".join(industries)
-        
-        if distance:
-            params["distance"] = distance
-        
-        # Make the API request
-        return self._make_request("jobSearch", params=params)
-    
-    def get_job_details(self, job_id):
-        """
-        Get detailed information about a specific job posting.
-        
-        Parameters:
-        - job_id: LinkedIn job ID
-        
-        Returns:
-        - Dictionary with job details
-        """
-        return self._make_request(f"jobs/{job_id}")
-    
-    def get_company_details(self, company_id):
-        """
-        Get detailed information about a company.
-        
-        Parameters:
-        - company_id: LinkedIn company ID
-        
-        Returns:
-        - Dictionary with company details
-        """
-        return self._make_request(f"organizations/{company_id}")
-    
-    def get_recommended_jobs(self, job_titles=None, skills=None, 
-                            industries=None, location=None, count=25):
-        """
-        Get job recommendations based on provided criteria.
-        
-        Parameters:
-        - job_titles: List of job titles
-        - skills: List of skills
-        - industries: List of industry IDs
-        - location: Location name or ID
-        - count: Number of recommendations to return
-        
-        Returns:
-        - Dictionary with recommended jobs
-        """
-        params = {
-            "count": min(count, 100)
-        }
-        
-        # Add optional parameters if provided
-        if job_titles and isinstance(job_titles, list):
-            params["jobTitles"] = ",".join(job_titles)
-        
-        if skills and isinstance(skills, list):
-            params["skills"] = ",".join(skills)
-        
-        if industries and isinstance(industries, list):
-            params["industries"] = ",".join(industries)
-        
-        if location:
-            params["location"] = location
-        
-        return self._make_request("jobRecommendations", params=params)
-    
-    def save_job(self, job_id):
-        """
-        Save a job to the user's saved jobs list.
-        
-        Parameters:
-        - job_id: LinkedIn job ID
-        
-        Returns:
-        - Dictionary with result of save operation
-        """
-        params = {
-            "jobId": job_id
-        }
-        
-        return self._make_request("jobSaves", params=params, method="POST")
-    
-    def get_saved_jobs(self, start=0, count=25):
-        """
-        Get the user's saved jobs.
-        
-        Parameters:
-        - start: Starting index for pagination
-        - count: Number of results to return
-        
-        Returns:
-        - Dictionary with saved jobs
-        """
-        params = {
-            "start": start,
-            "count": min(count, 100)
-        }
-        
-        return self._make_request("jobSaves", params=params)
-    
-    def check_api_status(self):
-        """
-        Check if the LinkedIn API is properly configured and accessible.
-        
-        Returns:
-        - Dictionary with API status information
-        """
-        if not self.is_configured:
-            return {
-                "success": False,
-                "message": "LinkedIn API not configured. Please set environment variables.",
-                "data": {
-                    "missing_vars": [var for var in ['LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET', 
-                                                    'LINKEDIN_REDIRECT_URI', 'LINKEDIN_ACCESS_TOKEN'] 
-                                    if not os.environ.get(var)]
-                }
-            }
-        
-        # Make a simple request to check if the API is accessible
-        test_response = self._make_request("me")
-        
-        if test_response["success"]:
+    def search_jobs(self, **kwargs):
+        if self.use_mock_data:
             return {
                 "success": True,
-                "message": "LinkedIn API is properly configured and accessible.",
-                "data": {
-                    "api_version": "v2",
-                    "rate_limit": self.rate_limit_per_minute,
-                    "credentials_configured": True,
-                    "using_mock_data": self.use_mock_data
-                }
+                "message": "Mock search jobs successful",
+                "data": self._get_mock_job_search_response(**kwargs)
             }
-        else:
+        return self._make_request("jobSearch", params=kwargs, method="GET")
+    
+    def get_job_details(self, job_id):
+        if self.use_mock_data:
             return {
-                "success": False,
-                "message": f"LinkedIn API is configured but not accessible: {test_response['message']}",
-                "data": {
-                    "credentials_configured": True,
-                    "error": test_response['message'],
-                    "using_mock_data": self.use_mock_data
-                }
+                "success": True,
+                "message": "Mock job details successful",
+                "data": self._get_mock_job_details(job_id)
             }
-
-# Example usage
-if __name__ == "__main__":
-    # Set environment variables for testing
-    os.environ["LINKEDIN_CLIENT_ID"] = "your_client_id"
-    os.environ["LINKEDIN_CLIENT_SECRET"] = "your_client_secret"
-    os.environ["LINKEDIN_REDIRECT_URI"] = "your_redirect_uri"
-    os.environ["LINKEDIN_ACCESS_TOKEN"] = "your_access_token"
+        return self._make_request(f"jobs/{job_id}", method="GET")
     
-    # Initialize the API client
-    linkedin_api = LinkedInAPI()
-    
-    # Check API status
-    status = linkedin_api.check_api_status()
-    print(f"API Status: {status['message']}")
-    
-    # Search for jobs
-    if status["success"]:
-        job_search = linkedin_api.search_jobs(
-            keywords="Python Developer",
-            location="San Francisco",
-            experience_levels=["ENTRY_LEVEL", "MID_SENIOR"],
-            job_types=["FULL_TIME"],
-            count=10
-        )
-        
-        if job_search["success"]:
-            jobs = job_search["data"]["elements"]
-            print(f"Found {len(jobs)} jobs:")
-            for job in jobs:
-                print(f"- {job['title']} at {job['companyName']}")
-        else:
-            print(f"Job search failed: {job_search['message']}")
+    def check_api_status(self):
+        if not self.is_configured:
+            return {"success": False, "message": "LinkedIn API not configured."}
+        try:
+            response = self.session.get(f"{self.base_url}/me", timeout=10)
+            if response.status_code == 200:
+                return {"success": True, "message": "API is operational."}
+            else:
+                return {"success": False, "message": f"API returned status code {response.status_code}."}
+        except Exception as e:
+            return {"success": False, "message": f"API check error: {str(e)}"}
