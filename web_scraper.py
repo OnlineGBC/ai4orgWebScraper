@@ -6,7 +6,7 @@ import time
 import random
 import web_scraper_js  # ✅ import JS fallback
 from urllib.parse import urljoin, urlparse
-from config import OPENAI_CLIENT as client
+import openai
 import pytesseract
 from PIL import Image
 from io import BytesIO
@@ -103,13 +103,79 @@ def save_to_csv(result, filename):
         df.to_csv(filename, index=False)
 
 ###############################################################################
-# NEW: Initial site crawling to discover actual structure
+# NEW: Modified Recursive Extraction of URLs Only (with depth = 3, node limit = 200)
+###############################################################################
+def get_soup(url):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+    }
+    try:
+        with httpx.Client(timeout=15) as client:
+            response = client.get(url, headers=headers)
+            if response.status_code == 200:
+                return BeautifulSoup(response.text, "html.parser")
+            else:
+                return None
+    except Exception as e:
+        print(f"Error fetching soup for {url}: {e}")
+        return None
+
+def recursive_extract(url, current_depth=0, max_depth=3, visited=None, node_counter=None, node_limit=200):
+    if visited is None:
+        visited = set()
+    if node_counter is None:
+        node_counter = {"count": 0}
+    if node_counter["count"] >= node_limit:
+        return None
+    if url in visited:
+        return None
+    visited.add(url)
+    node_counter["count"] += 1
+
+    # Record only the URL
+    page_data = {"URL": url}
+
+    if current_depth < max_depth and node_counter["count"] < node_limit:
+        soup = get_soup(url)
+        if soup:
+            sub_pages = []
+            links = soup.find_all('a', href=True)
+            for link in links:
+                href = link['href']
+                full_url = urljoin(url, href)
+                if urlparse(full_url).netloc == urlparse(url).netloc:
+                    if full_url not in visited and node_counter["count"] < node_limit:
+                        sub_result = recursive_extract(full_url, current_depth + 1, max_depth, visited, node_counter, node_limit)
+                        if sub_result:
+                            sub_pages.append(sub_result)
+                        if node_counter["count"] >= node_limit:
+                            break
+            if sub_pages:
+                page_data['sub_pages'] = sub_pages
+    return page_data
+
+def recursive_extract_all(urls, max_depth=3, node_limit=200):
+    results = {}
+    for url in urls:
+        visited = set()
+        node_counter = {"count": 0}
+        result = recursive_extract(
+            url,
+            current_depth=0,
+            max_depth=max_depth,
+            visited=visited,
+            node_counter=node_counter,
+            node_limit=node_limit
+        )
+        if result:
+            results[url] = result
+    return results
+
+###############################################################################
+# Other functions (site structure discovery and AI-assisted path analysis)
 ###############################################################################
 def discover_site_structure(url, user_prompt):
-    """
-    Perform an initial crawl of the site to discover its actual structure
-    before making AI suggestions.
-    """
     print(f"Discovering site structure for {url}")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -143,16 +209,7 @@ def discover_site_structure(url, user_prompt):
         print(f"Error discovering site structure: {e}")
     return list(discovered_paths), leadership_related_paths
 
-###############################################################################
-# ENHANCED: AI-Assisted Path Analysis with actual site structure
-###############################################################################
 def ai_assisted_robots_analysis(url_list, user_prompt):
-    """
-    For each URL in the list:
-      1) Discover actual site structure through initial crawling
-      2) Use OpenAI to suggest which paths might have the requested info
-      3) Return a deduplicated list of up to 20 priority URLs per site and analysis text
-    """
     prioritized_urls = []
     ai_analysis_text = []
     for url in url_list:
@@ -175,7 +232,6 @@ def ai_assisted_robots_analysis(url_list, user_prompt):
                 site_nodes.append(full_path)
                 already_added_urls.add(full_path)
         try:
-            # Use openai.chat.completions.create directly (do not use client.ChatCompletion.create)
             import openai
             analysis_response = openai.chat.completions.create(
                 model="chatgpt-4o-latest",
@@ -243,52 +299,3 @@ def ai_assisted_robots_analysis(url_list, user_prompt):
                     prioritized_urls.append(full_path)
                     already_added_urls.add(full_path)
     return prioritized_urls, ai_analysis_text
-
-###############################################################################
-# NEW: Recursive Extraction of Node Contents (with depth = 3)
-###############################################################################
-def get_soup(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
-    }
-    try:
-        with httpx.Client(timeout=15) as client:
-            response = client.get(url, headers=headers)
-            if response.status_code == 200:
-                return BeautifulSoup(response.text, "html.parser")
-            else:
-                return None
-    except Exception as e:
-        print(f"Error fetching soup for {url}: {e}")
-        return None
-
-def recursive_extract(url, current_depth=0, max_depth=3, visited=None):
-    if visited is None:
-        visited = set()
-    if url in visited:
-        return None
-    visited.add(url)
-    
-    extraction = extract_article_content(url)
-    if extraction and isinstance(extraction, list):
-        page_data = extraction[0]
-    else:
-        page_data = {"URL": url, "Title": "", "FullContent": "", "Headings": {}}
-    
-    if current_depth < max_depth:
-        soup = get_soup(url)
-        if soup:
-            sub_pages = []
-            links = soup.find_all('a', href=True)
-            for link in links:
-                href = link['href']
-                full_url = urljoin(url, href)
-                if urlparse(full_url).netloc == urlparse(url).netloc:
-                    if full_url not in visited:
-                        sub_result = recursive_extract(full_url, current_depth + 1, max_depth, visited)
-                        if sub_result:
-                            sub_pages.append(sub_result)
-            if sub_pages:
-                page_data['sub_pages'] = sub_pages
-    return page_data
