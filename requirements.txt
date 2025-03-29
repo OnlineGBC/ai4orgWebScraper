@@ -10,7 +10,8 @@ lxml
 nltk
 openai>=1.6.0
 openpyxl
-pandas 
+pandas
+pdf2image 
 pillow
 plotly 
 pytesseract
@@ -20,3 +21,4 @@ requests
 selenium
 streamlit 
 webdriver-manager
+poppler-utils

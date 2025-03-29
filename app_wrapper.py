@@ -84,12 +84,12 @@ def cached_recursive_extract_all(urls_tuple, max_depth=3):
     return web_scraper.recursive_extract_all(urls_list, max_depth=max_depth)
 
 def run_app():
-    st.title("Domain-Specific Text Logs Only")
+    st.title("Web Scraping for Senior Leadership information")
     st.write("Enter URLs manually or upload a plain text file with URLs (one URL per line).")
 
     user_prompt = st.text_area(
         "Optionally describe specific info you want (e.g. names, titles, board members):",
-        value="Please gather contact information for senior leadership, including the CEO and the Board of Directors, along with their names, titles, and contact details.",
+        value="Act like an experienced marketer and data miner.  Please provide contact information for senior leadership, including the CEO and the Board of Directors, along with their names, titles, and contact details.",
         height=80,
     )
 
@@ -127,11 +127,12 @@ def run_app():
         if domain_results:
             st.subheader("Download Text File Per Domain")
             for domain, results_list in domain_results.items():
-                # Combine the results for this domain into one text block
-                text_content = ""
+                # Combine all node URLs for this domain, remove duplicates, and join them as a simple list
+                all_urls = []
                 for res in results_list:
-                    # sanitize and format
-                    text_content += format_recursive_data_for_word(res) + "\n\n"
+                    all_urls.extend(collect_urls(res))
+                unique_urls = list(dict.fromkeys(all_urls))
+                text_content = "\n".join(unique_urls)
 
                 # Assign the content to a variable named <domain>_url_log_<timestamp>
                 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -139,9 +140,10 @@ def run_app():
                 var_name = f"{var_domain}_url_log_{timestamp}"
                 globals()[var_name] = text_content
 
-                # Save to a text file
+                # Save to a text file and also store it in session_state for crawl extraction
                 domain_url = f"https://{domain}"
                 text_filepath = save_to_text(text_content, domain_url)
+                st.session_state.consolidated_url_log = text_content
 
                 st.markdown(f"**Files for {domain}**")
                 with open(text_filepath, "rb") as f_txt:
@@ -153,6 +155,26 @@ def run_app():
                     )
         else:
             st.info("No extraction data found for the provided URLs.")
+
+        # --- Crawl Extraction Section ---
+        # Process the consolidated text log using crawl_extractor and display download buttons
+        if "consolidated_url_log" in st.session_state and st.session_state.consolidated_url_log:
+            from crawl_extractor import crawl_extract_text_from_log
+            crawl_results = crawl_extract_text_from_log(st.session_state.consolidated_url_log)
+            st.subheader("Crawled Extraction per Domain")
+            for domain, crawl_text in crawl_results.items():
+                st.markdown(f"**Crawled Extraction for {domain}**")
+                temp_filename = f"{domain.replace('.', '_')}_crawl_extract.txt"
+                with open(temp_filename, "w", encoding="utf-8") as f:
+                    f.write(crawl_text)
+                with open(temp_filename, "rb") as f:
+                    st.download_button(
+                        f"Download Crawled Text for {domain}",
+                        f,
+                        file_name=temp_filename,
+                        key=f"download_crawl_{domain}"
+                    )
+                os.remove(temp_filename)
 
 if __name__ == "__main__":
     run_app()
