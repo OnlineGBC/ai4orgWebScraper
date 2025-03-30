@@ -20,9 +20,22 @@ def extract_text_from_url(url: str) -> str:
     """
     Given a URL, extract its text content using httpx/BeautifulSoup,
     fallback to Selenium if necessary, and run OCR on images.
+    Embedded resources (images) hosted on external domains are skipped.
     """
+    import io
+    import time
+    import random
+    from urllib.parse import urlparse, urljoin
+    import httpx
+    from bs4 import BeautifulSoup
+    from PIL import Image
+    import pytesseract
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+
     extracted_text = ""
     soup = None
+    original_domain = urlparse(url).netloc
 
     # Attempt extraction using httpx + BeautifulSoup
     try:
@@ -38,15 +51,37 @@ def extract_text_from_url(url: str) -> str:
                 extracted_text = title + "\n" + page_text
     except Exception as e:
         extracted_text = f"Error fetching {url}: {str(e)}"
-    # If extraction is too short, fallback to Selenium
+    
+    # Fallback to Selenium if extraction is too short
     if len(extracted_text) < 100:
         try:
+            from selenium.webdriver.chrome.options import Options
+            import tempfile
+            import random
+            import os
+
             options = Options()
             options.add_argument("--headless")
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument("--disable-gpu")
-            options.add_argument("--remote-debugging-port=9222")
+            # Set a random remote debugging port to avoid conflicts
+            remote_port = random.randint(9222, 9322)
+            options.add_argument(f"--remote-debugging-port={remote_port}")
+
+            # Create a unique temporary user data directory
+            user_data_dir = tempfile.mkdtemp()
+            options.add_argument(f"--user-data-dir={user_data_dir}")
+
+            # Debug output: print directory path, its contents, and the port used
+            print("DEBUG: Using temporary user data directory:", user_data_dir)
+            try:
+                contents = os.listdir(user_data_dir)
+            except Exception as list_err:
+                contents = f"Error listing directory: {str(list_err)}"
+            print("DEBUG: Contents of temporary user data directory:", contents)
+            print("DEBUG: Using remote debugging port:", remote_port)
+
             driver = webdriver.Chrome(options=options)
             driver.get(url)
             time.sleep(5)  # Allow page to load
@@ -61,11 +96,10 @@ def extract_text_from_url(url: str) -> str:
         except Exception as e:
             extracted_text += f"\nSelenium fallback error: {str(e)}"
 
-    # If the URL is a PDF, perform PDF OCR extraction using pdf2image
+    # PDF extraction (if URL ends with .pdf)
     if url.lower().endswith(".pdf"):
         try:
             from pdf2image import convert_from_bytes
-            # Set headers to mimic a browser and request PDF content
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36",
@@ -84,9 +118,8 @@ def extract_text_from_url(url: str) -> str:
             extracted_text += f"\nPDF OCR extraction error: {str(e)}"
         return extracted_text
 
-    # OCR extraction on images
+    # OCR extraction on images (skip external images)
     try:
-        # Ensure soup is available
         if not soup:
             headers = {"User-Agent": "Mozilla/5.0"}
             with httpx.Client(timeout=15) as client:
@@ -98,6 +131,9 @@ def extract_text_from_url(url: str) -> str:
             src = img.get("src")
             if src:
                 img_url = urljoin(url, src)
+                # Skip if the image is hosted on an external domain
+                if urlparse(img_url).netloc != original_domain:
+                    continue
                 try:
                     img_resp = httpx.get(img_url, timeout=10)
                     if img_resp.status_code == 200:
@@ -111,6 +147,7 @@ def extract_text_from_url(url: str) -> str:
     except Exception as e:
         extracted_text += f"\nOCR extraction error: {str(e)}"
     return extracted_text
+
 
 def crawl_extract_text_from_log(input_text: str) -> dict:
     """
@@ -143,6 +180,7 @@ def crawl_extract_text_from_log(input_text: str) -> dict:
         globals()[var_name] = content
 
     return domain_aggregates
+
 
 # Example usage for testing (remove or comment out when integrating into the UI)
 if __name__ == "__main__":
