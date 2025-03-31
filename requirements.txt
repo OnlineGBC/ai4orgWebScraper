@@ -4,21 +4,31 @@
 
 # Actual Python dependencies are below:
 
-beautifulsoup4 
+beautifulsoup4
+"camelot-py[cv]" 
 httpx
+layoutparser
 lxml 
 nltk
 openai>=1.6.0
 openpyxl
+paddleocr
 pandas
+pdf2docx
 pdf2image 
+pdfplumber
 pillow
 plotly 
+pymupdf
 pytesseract
 python-docx
 python-dotenv
 requests 
+tabula-py
 selenium
 streamlit 
 webdriver-manager
 poppler-utils
+
+
+      

@@ -29,6 +29,15 @@ def extract_article_content(url):
         time.sleep(delay - elapsed)
     extract_article_content.last_request_time = time.time()
 
+    # Delegate PDF extraction to dedicated module if URL is a PDF
+    if url.lower().endswith(".pdf"):
+        try:
+            from pdf_extractor import extract_text_from_pdf_url
+            pdf_text = extract_text_from_pdf_url(url, languages=['eng', 'jpn', 'chi_sim', 'kor'])
+            return [{"URL": url, "Title": "PDF Document", "FullContent": pdf_text, "Headings": {}}]
+        except Exception as e:
+            return [{"URL": url, "Error": f"PDF extraction error: {e}"}]
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
@@ -176,7 +185,7 @@ def recursive_extract_all(urls, max_depth=3, node_limit=200):
 # Other functions (site structure discovery and AI-assisted path analysis)
 ###############################################################################
 def discover_site_structure(url, user_prompt):
-    print(f"Discovering site structure for {url}")
+    # print(f"Discovering site structure for {url}")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"

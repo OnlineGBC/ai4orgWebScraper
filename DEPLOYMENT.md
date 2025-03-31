@@ -16,6 +16,9 @@ This document provides instructions for deploying and running the aioOrg Web Scr
    ```bash
    cd ai4orgWebScraper
    pip install -r requirements.txt
+   git clone git@github.com:OnlineGBC/ai4orgWebScraper.git .
+   git clone https://github.com/tesseract-ocr/tessdata.git  (for languages)
+   sudo cp tessdata/*.traineddata /usr/share/tesseract-ocr/4.00/tessdata/
    ```
 
 3. **Download NLTK resources (for the general web scraper)**

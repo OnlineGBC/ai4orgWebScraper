@@ -12,6 +12,7 @@ def split_text_into_chunks(text, chunk_size=2000):
     It groups paragraphs until the total length exceeds `chunk_size`.
     Then, it ensures that no chunk exceeds `chunk_size` by further splitting if needed.
     """
+    # First, try to split using paragraph breaks.
     paragraphs = text.split("\n\n")
     chunks = []
     current_chunk = ""
@@ -20,6 +21,7 @@ def split_text_into_chunks(text, chunk_size=2000):
             candidate = current_chunk + "\n\n" + para
         else:
             candidate = para
+        # If adding this paragraph exceeds the chunk_size and current_chunk is non-empty, finalize the current chunk.
         if len(candidate) > chunk_size and current_chunk:
             chunks.append(current_chunk.strip())
             current_chunk = para
@@ -28,6 +30,7 @@ def split_text_into_chunks(text, chunk_size=2000):
     if current_chunk:
         chunks.append(current_chunk.strip())
     
+    # Ensure that each chunk does not exceed chunk_size by further splitting if needed.
     final_chunks = []
     for chunk in chunks:
         if len(chunk) > chunk_size:
@@ -46,6 +49,7 @@ def get_embedding(text):
         model="text-embedding-ada-002",
         input=text
     )
+    
     return response.data[0].embedding
 
 def cosine_similarity(vec1, vec2):
@@ -54,6 +58,7 @@ def cosine_similarity(vec1, vec2):
     """
     vec1 = np.array(vec1)
     vec2 = np.array(vec2)
+    # Add a small epsilon to avoid division by zero
     return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2) + 1e-10)
 
 def build_vector_store(text):
@@ -82,17 +87,23 @@ def retrieve_relevant_context(query, vector_store, top_k=3):
     top_chunks = [chunk for score, chunk in scored_chunks[:top_k]]
     return "\n".join(top_chunks)
 
+def truncate_text(text, max_chars=3000):
+    """
+    Truncates the text to a maximum number of characters.
+    """
+    if len(text) > max_chars:
+        return text[:max_chars] + "..."
+    return text
+
 # --- Main Chat Function with RAG Integration ---
 
 def run_chat():
     # Hidden system prompt; not shown in UI.
     system_prompt = (
-        "Act like an experienced marketer and data miner and look for information on senior leadership, "
-        "like the Founder or Co-Founder, CEO, CFO, other C-level officers, or the Board of Directors, along with their names, titles, and social media or other contact details.  "
-        "If senior leadership is not found, get the top 10 team members by title.  Only get information from your internal data.  Do not search the Internet or any public sources."
+        "Act like an experienced marketer and data miner.  Please provide contact information for senior leadership, like the Founder or Co-Founder, CEO, CFO, other C-level officers, or the Board of Directors, along with their names, titles, and contact details.  Only get information from the RAG embeddings in your internal data.  Do not search the Internet or any public sources."
     )
     
-    # Default query text used internally if no user input is given.
+    # Default query text that will be used if no user input is given.
     default_query = (
         "Extract the detailed leadership information from the internal data, including names, titles, and contact details."
     )
@@ -109,35 +120,39 @@ def run_chat():
         st.error("No crawled text data available. Please ensure that the crawled_text variable is populated.")
         return
     
-    # Build vector store from crawled_text if not already processed.
+    # Build vector store from crawled_text if available and not already processed.
     if "vector_store" not in st.session_state:
         with st.spinner("Processing crawled text for retrieval..."):
             st.session_state.vector_store = build_vector_store(st.session_state.crawled_text)
     
     st.markdown("### Follow-up Chat")
     
-    # Display chat history.
+    # Display chat history
     for msg in st.session_state.chat_history:
         if msg["role"] == "assistant":
             st.chat_message("assistant").write(msg["content"])
         elif msg["role"] == "user":
             st.chat_message("user").write(msg["content"])
     
-    # If no chat history exists (first run), generate an initial response using default_query
-    # without adding the default query to the visible chat history.
+    # If no chat history exists (i.e. first run), pre-populate with default query.
     if not st.session_state.chat_history:
+        st.session_state.chat_history.append({"role": "user", "content": default_query})
+        
+        # Retrieve relevant context based on default query.
         context = ""
         if "vector_store" in st.session_state:
             context = retrieve_relevant_context(default_query, st.session_state.vector_store, top_k=5)
-            # st.write("Debug: Retrieved context for default query:", context)
+            st.write("Debug: Retrieved context for default query:", context)
         
+        truncated_context = truncate_text(context, max_chars=3000)
+        
+        # Construct the messages for the chat completion.
         messages = [
             {"role": "system", "content": system_prompt},
         ]
-        if context:
-            messages.append({"role": "system", "content": f"Relevant context:\n{context}"})
-        # Use the default query solely for prompt construction.
-        messages.append({"role": "user", "content": default_query})
+        if truncated_context:
+            messages.append({"role": "system", "content": f"Relevant context:\n{truncated_context}"})
+        messages.extend(st.session_state.chat_history)
         
         with st.spinner("Generating response..."):
             response = OPENAI_CLIENT.chat.completions.create(
@@ -148,23 +163,27 @@ def run_chat():
             )
             assistant_response = response.choices[0].message.content.strip()
         st.session_state.chat_history.append({"role": "assistant", "content": assistant_response})
-        st.experimental_rerun()
+        st.experimental_rerun()  # Re-run to display the new chat history.
     
     # Accept new user input via st.chat_input.
     user_input = st.chat_input("Ask a follow-up question about the crawled content:")
     if user_input:
         st.session_state.chat_history.append({"role": "user", "content": user_input})
         
+        # Retrieve relevant context from the vector store based on the user's query.
         context = ""
         if "vector_store" in st.session_state:
             context = retrieve_relevant_context(user_input, st.session_state.vector_store, top_k=5)
-            # st.write("Debug: Retrieved context for user query:", context)
+            st.write("Debug: Retrieved context for user query:", context)
         
+        truncated_context = truncate_text(context, max_chars=3000)
+        
+        # Construct the messages for the chat completion.
         messages = [
             {"role": "system", "content": system_prompt},
         ]
-        if context:
-            messages.append({"role": "system", "content": f"Relevant context:\n{context}"})
+        if truncated_context:
+            messages.append({"role": "system", "content": f"Relevant context:\n{truncated_context}"})
         messages.extend(st.session_state.chat_history)
         
         with st.spinner("Generating response..."):

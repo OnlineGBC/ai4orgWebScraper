@@ -33,6 +33,16 @@ def extract_text_from_url(url: str) -> str:
     fallback to Selenium if necessary, and run OCR on images.
     Embedded resources (images) hosted on external domains are skipped.
     """
+    import io
+    import time
+    from urllib.parse import urlparse, urljoin
+    import httpx
+    from bs4 import BeautifulSoup
+    from PIL import Image
+    import pytesseract
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+
     extracted_text = ""
     soup = None
     original_domain = urlparse(url).netloc
@@ -71,13 +81,13 @@ def extract_text_from_url(url: str) -> str:
             user_data_dir = tempfile.mkdtemp()
             options.add_argument(f"--user-data-dir={user_data_dir}")
 
-            # print("DEBUG: Using temporary user data directory:", user_data_dir)
+            print("DEBUG: Using temporary user data directory:", user_data_dir)
             try:
                 contents = os.listdir(user_data_dir)
             except Exception as list_err:
                 contents = f"Error listing directory: {str(list_err)}"
-            # print("DEBUG: Contents of temporary user data directory:", contents)
-            # print("DEBUG: Using remote debugging port:", remote_port)
+            print("DEBUG: Contents of temporary user data directory:", contents)
+            print("DEBUG: Using remote debugging port:", remote_port)
 
             driver = webdriver.Chrome(options=options)
             driver.get(url)
@@ -136,74 +146,53 @@ def extract_text_from_url(url: str) -> str:
     return extracted_text
 
 
-def process_url(url):
-    """
-    Given a URL, attempt to extract text content.
-    Returns a tuple: (domain, extracted_text, error_message)
-    """
-    # Normalize URL (assume HTTPS if scheme missing)
-    if not urlparse(url).scheme:
-        url = "https://" + url
-    try:
-        domain = urlparse(url).netloc
-        page_text = extract_text_from_url(url)
-        entry = f"URL: {url}\n{page_text}\n"
-        return domain, entry, None
-    except Exception as e:
-        domain = urlparse(url).netloc
-        error_msg = f"Error processing {url}: {str(e)}"
-        return domain, "", error_msg
-
-
-def crawl_extract_text_from_log(input_text: str) -> tuple:
+def crawl_extract_text_from_log(input_text: str) -> dict:
     """
     Accepts an input text variable containing one URL per line,
     crawls each URL using traditional methods (multi-threaded),
-    aggregates the extracted text, and for each domain, assigns the aggregated text to a global variable.
-    Returns a tuple: (domain_successes, domain_errors)
-      - domain_successes is a dict mapping domain to aggregated successful extraction text.
-      - domain_errors is a dict mapping domain to aggregated error messages.
+    aggregates the extracted text, and for each domain, assigns the aggregated text to a global variable named:
+      <<domain>>_crawl_extract_<<yyyymmdd-hhmmss>>
+    Returns a dictionary mapping each domain to its aggregated extracted text.
     """
     # Parse input text to get the list of URLs
     url_list = [line.strip() for line in input_text.splitlines() if line.strip()]
+    domain_aggregates = {}
+
+    import concurrent.futures
+
+    def process_url(url):
+        # Normalize URL (assume HTTPS if scheme missing)
+        if not urlparse(url).scheme:
+            url = "https://" + url
+        domain = urlparse(url).netloc
+        page_text = extract_text_from_url(url)
+        entry = f"URL: {url}\n{page_text}\n"
+        return domain, entry
+
     results = []
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = {executor.submit(process_url, url): url for url in url_list}
         for future in concurrent.futures.as_completed(futures):
-            domain, entry, error = future.result()
-            results.append((domain, entry, error))
+            try:
+                domain, entry = future.result()
+                results.append((domain, entry))
+            except Exception as e:
+                # Optionally log the error
+                pass
 
-    domain_successes = {}
-    domain_errors = {}
-    for domain, entry, error in results:
-        if error:
-            if domain in domain_errors:
-                domain_errors[domain] += "\n" + error
-            else:
-                domain_errors[domain] = error
+    for domain, entry in results:
+        if domain in domain_aggregates:
+            domain_aggregates[domain] += "\n" + entry
         else:
-            if domain in domain_successes:
-                domain_successes[domain] += "\n" + entry
-            else:
-                domain_successes[domain] = entry
+            domain_aggregates[domain] = entry
 
-    # For each domain in successes, assign the aggregated text to a dynamically named global variable.
-    for domain, content in domain_successes.items():
+    # For each domain, assign the aggregated text to a dynamically named global variable.
+    for domain, content in domain_aggregates.items():
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         var_name = f"{domain.replace('.', '_')}_crawl_extract_{timestamp}"
         globals()[var_name] = content
 
-    return domain_successes, domain_errors
-
-
-def crawl_extract_text_from_log_wrapper(input_text: str) -> dict:
-    """
-    A wrapper function to call crawl_extract_text_from_log and return only the successes.
-    This can be used by UI code that only needs successful extraction.
-    """
-    successes, errors = crawl_extract_text_from_log(input_text)
-    # Optionally, errors can be logged or handled separately.
-    return successes
+    return domain_aggregates
 
 # Example usage for testing (remove or comment out when integrating into the UI)
 if __name__ == "__main__":
@@ -211,10 +200,7 @@ if __name__ == "__main__":
 https://imgflip.com/
 https://imgflip.com/memegenerator
 """
-    successes, errors = crawl_extract_text_from_log(sample_input)
-    for domain, text in successes.items():
+    results = crawl_extract_text_from_log(sample_input)
+    for domain, text in results.items():
         print(f"--- Extracted content for {domain} (first 500 characters) ---")
         print(text[:500])
-    for domain, err in errors.items():
-        print(f"--- Errors for {domain} ---")
-        print(err)

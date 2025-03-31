@@ -34,3 +34,8 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed installation and usage instructi
 1. Install dependencies:
    ```bash
    pip install -r requirements.txt
+   git clone git@github.com:OnlineGBC/ai4orgWebScraper.git .
+   git clone https://github.com/tesseract-ocr/tessdata.git  (for languages)
+   sudo cp tessdata/*.traineddata /usr/share/tesseract-ocr/4.00/tessdata/
+   streamlit run app.py
+   

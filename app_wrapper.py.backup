@@ -87,7 +87,11 @@ def run_app():
     st.title("Web Scraping for Senior Leadership information")
     st.write("Enter URLs manually or upload a plain text file with URLs (one URL per line).")
 
-    user_prompt = "Act like an experienced marketer and data miner and look for information on senior leadership, like the Founder or Co-Founder, CEO, CFO, other C-level officers, or the Board of Directors, along with their names, titles, and social media or other contact details.  If senior leadership is not found, get the top 10 team members by title. Only get information from your internal data.  Do not search the Internet or any public sources."
+    user_prompt = st.text_area(
+        "Optionally describe specific info you want (e.g. names, titles, board members):",
+        value="Act like an experienced marketer and data miner. Please provide contact information for senior leadership, including the CEO and the Board of Directors, along with their names, titles, and contact details. Only get information from the RAG embeddings in your internal data. Do not search the Internet or any public sources",
+        height=80,
+    )
 
     uploaded_file = st.file_uploader("Upload a plain text file with URLs", type=["txt"])
     urls = []
@@ -134,7 +138,7 @@ def run_app():
             import base64
 
             if domain_results:
-                st.subheader("Crawling and Extracting Your Data . . . please wait . . . ")
+                st.subheader("Crawled Extraction per Domain")
                 # Use session_state to store generated file names per domain.
                 if "extracted_files" not in st.session_state:
                     st.session_state.extracted_files = {}
@@ -147,9 +151,9 @@ def run_app():
                     unique_urls = list(dict.fromkeys(all_urls))
                     text_content = "\n".join(unique_urls)
                     # Call the multi-threaded crawl extraction for this domain's log.
-                    successes, errors = crawl_extract_text_from_log(text_content)
-                    # Retrieve the result for this domain (success and error texts separately).
-                    return domain, successes.get(domain, ""), errors.get(domain, "")
+                    crawl_result = crawl_extract_text_from_log(text_content)
+                    # Retrieve the result for this domain.
+                    return domain, crawl_result.get(domain, "")
 
                 futures = {}
                 with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -157,27 +161,21 @@ def run_app():
                         futures[executor.submit(process_domain, domain, results_list)] = domain
 
                 for future in concurrent.futures.as_completed(futures):
-                    domain, crawl_text, error_text = future.result()
+                    domain, crawl_text = future.result()
                     st.markdown(f"**Crawled Extraction for {domain}**")
                     # Determine the unique file name for this domain.
                     domain_key = domain.replace('.', '_')
-                    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                    file_name = f"{domain_key}_Extract_data-{timestamp}.txt"
                     if domain not in st.session_state.extracted_files:
+                        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                        file_name = f"{domain_key}_Extract_data-{timestamp}.txt"
                         file_path = os.path.join("temp_uploaded_files", file_name)
                         st.session_state.extracted_files[domain] = file_path
                     else:
                         file_path = st.session_state.extracted_files[domain]
-                    # Append the successful crawl_text to the file.
+                    # Append the current crawl_text to the file.
                     with open(file_path, "a", encoding="utf-8") as f:
                         f.write(crawl_text + "\n")
-                    # If there are errors, write them to a separate error file.
-                    if error_text:
-                        error_file_name = file_name.replace("Extract_data", "Extract_data_err")
-                        error_file_path = os.path.join("temp_uploaded_files", error_file_name)
-                        with open(error_file_path, "a", encoding="utf-8") as f:
-                            f.write(error_text + "\n")
-                    # Read the main file content and encode as Base64 for download.
+                    # Read the file content and encode as Base64 for download.
                     with open(file_path, "rb") as f:
                         data = f.read()
                     b64 = base64.b64encode(data).decode()
@@ -194,10 +192,11 @@ def run_app():
         with open(first_file, "r", encoding="utf-8") as f:
             st.session_state.crawled_text = f.read()
 
-    # Automatically launch the chat interface if crawled_text exists and is non-empty.
+    # Only show the Open Chat button if crawled_text exists and is non-empty.
     if "crawled_text" in st.session_state and st.session_state.crawled_text.strip():
-        import chat_wrapper
-        chat_wrapper.run_chat()
+        if st.button("Open Chat"):
+            import chat_wrapper
+            chat_wrapper.run_chat()
     else:
         st.write("Chat interface is not available until extraction is successful.")
 
