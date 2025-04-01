@@ -90,6 +90,7 @@ def run_chat():
         "Act like an experienced marketer and data miner and look for information on senior leadership, "
         "like the Founder or Co-Founder, CEO, CFO, other C-level officers, or the Board of Directors, along with their names, titles, and social media or other contact details.  "
         "If senior leadership is not found, get the top 10 team members by title.  Only get information from your RAG and internal data.  Do not search the Internet or any public sources."
+        "NEVER, EVER, guess or hallucinate.  If you found no information, say so."
     )
     
     # Default query text used internally if no user input is given.
@@ -97,6 +98,7 @@ def run_chat():
         "Act like an experienced marketer and data miner and look for information on senior leadership, "
         "like the Founder or Co-Founder, CEO, CFO, other C-level officers, or the Board of Directors, along with their names, titles, and social media or other contact details.  "
         "If senior leadership is not found, get the top 10 team members by title.  Only get information from your RAG and internal data.  Do not search the Internet or any public sources."
+        "NEVER, EVER, guess or hallucinate.  If you found no information, say so."
     )
     
     # Initialize conversation history if it doesn't exist.

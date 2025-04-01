@@ -1,16 +1,22 @@
 # Also requires system-level (for example sudo apt install for Ubuntu):
+#   sudo apt update
 #   tesseract-ocr
 #   tesseract-ocr-all (or individual language packs)
+#   sudo apt install poppler-utils
+#   sudo apt install ghostscript python3-tk
+
 
 # Actual Python dependencies are below:
 
 beautifulsoup4
-"camelot-py[cv]" 
+camelot-py
+ghostscript
 httpx
 layoutparser
 lxml 
 nltk
 openai>=1.6.0
+opencv-python
 openpyxl
 paddleocr
 pandas
@@ -18,7 +24,8 @@ pdf2docx
 pdf2image 
 pdfplumber
 pillow
-plotly 
+plotly
+poppler-utils
 pymupdf
 pytesseract
 python-docx
@@ -26,9 +33,8 @@ python-dotenv
 requests 
 tabula-py
 selenium
-streamlit 
+streamlit==1.29 
 webdriver-manager
-poppler-utils
 
 
       

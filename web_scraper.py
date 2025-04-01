@@ -24,7 +24,7 @@ def extract_article_content(url):
     if not hasattr(extract_article_content, "last_request_time"):
         extract_article_content.last_request_time = 0
     elapsed = time.time() - extract_article_content.last_request_time
-    delay = random.uniform(0.5, 2.0)
+    delay = random.uniform(2, 4.0)
     if elapsed < delay:
         time.sleep(delay - elapsed)
     extract_article_content.last_request_time = time.time()
@@ -187,8 +187,10 @@ def recursive_extract_all(urls, max_depth=3, node_limit=200):
 def discover_site_structure(url, user_prompt):
     # print(f"Discovering site structure for {url}")
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.google.com/"
     }
     parsed_url = urlparse(url)
     base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"

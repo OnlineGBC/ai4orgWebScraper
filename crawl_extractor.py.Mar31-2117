@@ -39,12 +39,7 @@ def extract_text_from_url(url: str) -> str:
 
     # Attempt extraction using httpx + BeautifulSoup
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://www.google.com/"
-        }
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         with httpx.Client(timeout=15) as client:
             response = client.get(url, headers=headers)
             if response.status_code == 200:
@@ -61,6 +56,7 @@ def extract_text_from_url(url: str) -> str:
     if len(extracted_text) < 100:
         try:
             from selenium.webdriver.chrome.options import Options
+            import tempfile
 
             options = Options()
             options.add_argument("--headless")
@@ -70,6 +66,18 @@ def extract_text_from_url(url: str) -> str:
             # Allocate a remote debugging port from the FIFO pool
             remote_port = port_queue.get()
             options.add_argument(f"--remote-debugging-port={remote_port}")
+
+            # Create a unique temporary user data directory (leave as is)
+            user_data_dir = tempfile.mkdtemp()
+            options.add_argument(f"--user-data-dir={user_data_dir}")
+
+            # print("DEBUG: Using temporary user data directory:", user_data_dir)
+            try:
+                contents = os.listdir(user_data_dir)
+            except Exception as list_err:
+                contents = f"Error listing directory: {str(list_err)}"
+            # print("DEBUG: Contents of temporary user data directory:", contents)
+            # print("DEBUG: Using remote debugging port:", remote_port)
 
             driver = webdriver.Chrome(options=options)
             driver.get(url)
@@ -100,12 +108,7 @@ def extract_text_from_url(url: str) -> str:
     # OCR extraction on images (skip external images)
     try:
         if not soup:
-            headers = {
-                "User-Agent": "Mozilla/5.0",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://www.google.com/"
-            }
+            headers = {"User-Agent": "Mozilla/5.0"}
             with httpx.Client(timeout=15) as client:
                 response = client.get(url, headers=headers)
                 soup = BeautifulSoup(response.text, "html.parser")
@@ -192,6 +195,7 @@ def crawl_extract_text_from_log(input_text: str) -> tuple:
 
     return domain_successes, domain_errors
 
+
 def crawl_extract_text_from_log_wrapper(input_text: str) -> dict:
     """
     A wrapper function to call crawl_extract_text_from_log and return only the successes.
@@ -200,7 +204,6 @@ def crawl_extract_text_from_log_wrapper(input_text: str) -> dict:
     successes, errors = crawl_extract_text_from_log(input_text)
     # Optionally, errors can be logged or handled separately.
     return successes
-
 
 # Example usage for testing (remove or comment out when integrating into the UI)
 if __name__ == "__main__":
