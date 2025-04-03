@@ -195,9 +195,11 @@ def run_app():
 
     # After processing, if extracted_files exists, load the first file's content into session_state for chat.
     if "extracted_files" in st.session_state and st.session_state.extracted_files:
-        first_file = list(st.session_state.extracted_files.values())[0]
-        with open(first_file, "r", encoding="utf-8") as f:
-            st.session_state.crawled_text = f.read()
+        all_crawled_text = ""
+        for file_path in st.session_state.extracted_files.values():
+            with open(file_path, "r", encoding="utf-8") as f:
+                all_crawled_text += f.read() + "\n"
+        st.session_state.crawled_text = all_crawled_text.strip()
 
     # Automatically launch the chat interface if crawled_text exists and is non-empty.
     if "crawled_text" in st.session_state and st.session_state.crawled_text.strip():

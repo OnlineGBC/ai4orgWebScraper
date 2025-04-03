@@ -1,17 +1,94 @@
 import streamlit as st
 import openai
+import json
 import numpy as np
+import re
 from datetime import datetime
 from config import OPENAI_CLIENT
+
+# --- Query rewriting utility ---
+def expand_query(query: str) -> str:
+    """
+    Expand the user's query with synonyms or related terms to improve retrieval matching.
+    1) For unambiguous acronyms, do a straightforward two-way expansion (if "CEO" found,
+       append "Chief Executive Officer", etc.).
+    2) For ambiguous acronyms like "CDO" or "CSO", attempt to detect context from the query.
+       If context words match a specific meaning, append that full title.
+       If multiple expansions match or there's no context, optionally append all expansions.
+    This helps align the user's question with how the data might appear in the RAG corpus.
+    """
+
+    # Dictionary for unambiguous expansions
+    ACRONYM_SINGLE_MAP = {
+        "CEO": "Chief Executive Officer",
+        "CFO": "Chief Financial Officer",
+        "COO": "Chief Operating Officer",
+        "CTO": "Chief Technology Officer",
+        "CMO": "Chief Marketing Officer",
+        "CIO": "Chief Information Officer",
+        "CHRO": "Chief Human Resources Officer",
+    }
+
+    # Dictionary mapping each ambiguous acronym to possible expansions
+    # each with hint words that help us disambiguate
+    ACRONYM_AMBIGUOUS_MAP = {
+        "CDO": [
+            ("Chief Data Officer", ["data", "analytics", "big data", "etl", "database"]),
+            ("Chief Diversity Officer", ["diversity", "inclusion", "dei"]),
+        ],
+        "CSO": [
+            ("Chief Strategy Officer", ["strategy", "strategic", "vision", "business plan"]),
+            ("Chief Security Officer", ["security", "risk", "cyber", "compliance"]),
+            ("Chief Sustainability Officer", ["sustainability", "environment", "green", "CSR", "corporate social responsibility"]),
+        ],
+        "CRO": [
+            ("Chief Revenue Officer", ["revenue", "sales", "growth", "pricing", "market share", "monetization"]),
+            ("Chief Risk Officer", ["risk", "compliance", "mitigation", "assurance", "regulatory", "governance"]),
+        ]
+    }
+
+    expanded_query = query
+    lower_query = query.lower()
+
+    # ---------------- Unambiguous expansions ----------------
+    for acronym, full_title in ACRONYM_SINGLE_MAP.items():
+        # If acronym is present but the full title is not, add the full title
+        if acronym.lower() in lower_query and full_title.lower() not in lower_query:
+            expanded_query += f" {full_title}"
+        # If the full title is present but not the acronym, add the acronym
+        if full_title.lower() in lower_query and acronym.lower() not in lower_query:
+            expanded_query += f" {acronym}"
+
+    # ---------------- Ambiguous expansions ----------------
+    for acronym, expansions in ACRONYM_AMBIGUOUS_MAP.items():
+        # Check if the acronym is present in the query
+        if acronym.lower() in lower_query:
+            matched_expansions = []
+            # For each possible meaning, see if any hint words appear
+            for (title, hint_words) in expansions:
+                if any(hint in lower_query for hint in hint_words):
+                    matched_expansions.append(title)
+            if matched_expansions:
+                # If we found one or more matches, add them all (some contexts might overlap)
+                for title in matched_expansions:
+                    if title.lower() not in lower_query:
+                        expanded_query += f" {title}"
+            else:
+                # No disambiguating words found -> optionally add ALL expansions
+                for (title, _) in expansions:
+                    if title.lower() not in lower_query:
+                        expanded_query += f" {title}"
+        else:
+            # The user didn't explicitly mention the acronym, but maybe spelled out the full title
+            for (title, hint_words) in expansions:
+                if title.lower() in lower_query and acronym.lower() not in lower_query:
+                    expanded_query += f" {acronym}"
+
+    return expanded_query
 
 # --- Helper functions for RAG ---
 
 def split_text_into_chunks(text, chunk_size=2000):
-    """
-    Splits text into chunks using paragraph breaks as boundaries.
-    It groups paragraphs until the total length exceeds `chunk_size`.
-    Then, it ensures that no chunk exceeds `chunk_size` by further splitting if needed.
-    """
     paragraphs = text.split("\n\n")
     chunks = []
     current_chunk = ""
@@ -21,20 +98,29 @@ def split_text_into_chunks(text, chunk_size=2000):
         else:
             candidate = para
         if len(candidate) > chunk_size and current_chunk:
+            # Current chunk is full; start a new chunk
             chunks.append(current_chunk.strip())
             current_chunk = para
         else:
             current_chunk = candidate
     if current_chunk:
         chunks.append(current_chunk.strip())
-    
+    # Now ensure no chunk exceeds chunk_size by splitting at neat boundaries
     final_chunks = []
     for chunk in chunks:
-        if len(chunk) > chunk_size:
-            for i in range(0, len(chunk), chunk_size):
-                final_chunks.append(chunk[i:i+chunk_size])
-        else:
+        if len(chunk) <= chunk_size:
             final_chunks.append(chunk)
+        else:
+            start = 0
+            while start < len(chunk):
+                # Try to cut at a newline boundary within the next chunk_size characters
+                end = min(start + chunk_size, len(chunk))
+                if end < len(chunk):
+                    newline_idx = chunk.rfind("\n", start, end)
+                    if newline_idx != -1 and newline_idx > start:
+                        end = newline_idx  # break at the last newline within the limit
+                final_chunks.append(chunk[start:end].strip())
+                start = end
     return final_chunks
 
 def get_embedding(text):
@@ -68,18 +154,33 @@ def build_vector_store(text):
         vector_store.append({"embedding": embedding, "text": chunk})
     return vector_store
 
-def retrieve_relevant_context(query, vector_store, top_k=3):
+def retrieve_relevant_context(query, vector_store, top_k=10, similarity_threshold=0.3):
     """
     Given a query and a vector store, compute the query's embedding,
     compare it against each stored chunk, and return the top_k most relevant segments.
+    
+    :param query: The user query string
+    :param vector_store: A list of dicts with "embedding" and "text" keys
+    :param top_k: Number of chunks to return after filtering/sorting
+    :param similarity_threshold: Chunks below this cosine similarity score are dropped
+    :return: A single string concatenating the most relevant chunk texts
     """
     query_embedding = get_embedding(query)
     scored_chunks = []
+    
     for item in vector_store:
         score = cosine_similarity(query_embedding, item["embedding"])
         scored_chunks.append((score, item["text"]))
+
+    # Sort chunks by descending similarity
     scored_chunks.sort(key=lambda x: x[0], reverse=True)
-    top_chunks = [chunk for score, chunk in scored_chunks[:top_k]]
+
+    # Filter out low-similarity chunks
+    filtered_chunks = [(score, text) for (score, text) in scored_chunks if score >= similarity_threshold]
+    
+    # Take top_k after filtering
+    top_chunks = [text for score, text in filtered_chunks[:top_k]]
+    
     return "\n".join(top_chunks)
 
 # --- Main Chat Function with RAG Integration ---
@@ -128,19 +229,24 @@ def run_chat():
     # If no chat history exists (first run), generate an initial response using default_query
     # without adding the default query to the visible chat history.
     if not st.session_state.chat_history:
-        context = ""
+        # Retrieve context for the default query, if possible
+
         if "vector_store" in st.session_state:
-            context = retrieve_relevant_context(default_query, st.session_state.vector_store, top_k=5)
-            # st.write("Debug: Retrieved context for default query:", context)
+            retrieved_context = retrieve_relevant_context(default_query, st.session_state.vector_store, top_k=10)
+        else:
+            retrieved_context = ""
         
-        messages = [
-            {"role": "system", "content": system_prompt},
-        ]
-        if context:
-            messages.append({"role": "system", "content": f"Relevant context:\n{context}"})
-        # Use the default query solely for prompt construction.
-        messages.append({"role": "user", "content": default_query})
-        
+        # Merge system prompt and retrieved context into a single system message
+        system_content = system_prompt
+        if retrieved_context:
+            system_content += f"\n\nRelevant context:\n{retrieved_context}"
+
+        # Now build the messages list with a single system message
+        messages = []
+        messages.append({"role": "system", "content": system_content})
+        # Present the default_query as a user question in conversation
+        messages.append({"role": "user", "content": default_query})        
+
         with st.spinner("Generating response..."):
             response = OPENAI_CLIENT.chat.completions.create(
                 model="chatgpt-4o-latest",
@@ -156,17 +262,21 @@ def run_chat():
     user_input = st.chat_input("Ask a follow-up question about the crawled content:")
     if user_input:
         st.session_state.chat_history.append({"role": "user", "content": user_input})
-        
-        context = ""
+
+        # --- Use the expand_query() function to add synonyms ---
+        # This ensures the retrieval step sees extra relevant terms.
+        expanded_user_input = expand_query(user_input)
+
         if "vector_store" in st.session_state:
-            context = retrieve_relevant_context(user_input, st.session_state.vector_store, top_k=5)
-            # st.write("Debug: Retrieved context for user query:", context)
+            retrieved_context = retrieve_relevant_context(expanded_user_input, st.session_state.vector_store, top_k=10)
+        else:
+            retrieved_context = ""
         
-        messages = [
-            {"role": "system", "content": system_prompt},
-        ]
-        if context:
-            messages.append({"role": "system", "content": f"Relevant context:\n{context}"})
+        # Build a single system message that merges instructions + context
+        merged_system_content = system_prompt
+        if retrieved_context:
+            merged_system_content += f"\n\nRelevant context:\n{retrieved_context}"
+        messages = [ {"role": "system", "content": merged_system_content} ]
         messages.extend(st.session_state.chat_history)
         
         with st.spinner("Generating response..."):

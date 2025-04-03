@@ -2,6 +2,7 @@ import streamlit as st
 import sys
 import warnings
 import os
+
 from config import OPENAI_CLIENT
 
 # Suppress all warnings globally
@@ -51,12 +52,15 @@ elif mode == "General Scraper":
 
 elif mode == "PDF Extraction and Processing":
     # Launch the PDF Extraction UI from pdf_extractor module
-    sys.path.append(os.path.dirname(__file__))
+#    print(os.path.dirname(__file__))
+#    sys.path.append(os.path.dirname(__file__))
+    import sys
+#    print(sys.path)
     try:
         import pdf_extractor
         pdf_extractor.run_app()
     except Exception as e:
-        st.error("PDF Extraction module not found. Please ensure that pdf_extractor.py is available.")
+        print(f"Error during import or run_app: {e}")  # Print the actual exception
 
 elif mode == "LinkedIn Scraper":
     # Launch the LinkedIn Scraper UI

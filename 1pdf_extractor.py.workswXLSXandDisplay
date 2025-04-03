@@ -12,18 +12,9 @@ from pdf2docx import Converter
 import streamlit as st
 import tempfile
 import base64
-import pandas as pd
-from openai import OpenAI
-from dotenv import load_dotenv
+import pandas as pd  # required for XLSX conversion
 
-# Load environment variables from .env file
-load_dotenv()
-
-# Set OpenAI API key from environment variable
-# openai.api_key = os.getenv("OPENAI_API_KEY")          #  This is the old syntax 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))    # This is the new syntax
-
-# logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO)
 
 # Define a no-op callback function for download buttons
 def noop():
@@ -33,6 +24,9 @@ def is_text_valid(text, threshold=0.1):
     """
     Check if the extracted text is likely valid by calculating the ratio 
     of alphanumeric characters (ignoring whitespace) to the total length.
+    A threshold of 0.1 is used so that even if text contains lots of spaces 
+    or punctuation, we accept it as long as there's a minimal proportion of 
+    alphanumeric content.
     """
     if not text:
         return False
@@ -79,7 +73,8 @@ def extract_ocr_text_from_pdf_bytes(pdf_bytes, lang='eng'):
 def extract_text_from_pdf_url(url, languages=['eng', 'jpn', 'chi_sim', 'kor']):
     """
     Download a PDF from the given URL and extract its text.
-    First, try native extraction; if that fails, fall back to OCR.
+    First, try native extraction; if that fails (or yields invalid text), 
+    fall back to OCR.
     """
     lang_str = "+".join(languages)
     try:
@@ -97,7 +92,7 @@ def extract_text_from_pdf_url(url, languages=['eng', 'jpn', 'chi_sim', 'kor']):
         logging.info("Native text extraction successful and valid.")
         return native_text
     else:
-        logging.info("Native text extraction insufficient; proceeding with OCR.")
+        logging.info("Native text extraction insufficient or invalid; proceeding with OCR.")
     
     ocr_text = extract_ocr_text_from_pdf_bytes(pdf_bytes, lang=lang_str)
     return ocr_text
@@ -147,56 +142,26 @@ def convert_pdf_to_excel_xlsx(pdf_path, xlsx_path):
         logging.error(f"Error converting PDF to XLSX: {e}")
         return False, str(e)
 
-def ask_pdf_question(pdf_text, question):
-    """
-    Ask a question about the PDF using OpenAI's GPT-4.
-    The prompt includes the extracted PDF text as context.
-    """
-    system_prompt = (
-        "You are an expert assistant that answers questions about a PDF document. "
-        "Use the provided PDF content to answer the question as accurately as possible. "
-        "Only refer to the information in the PDF."
-    )
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"PDF Content:\n{pdf_text}\n\nQuestion: {question}"}
-    ]
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=messages,
-            temperature=0.3,
-            max_tokens=500,
-        )
-        answer = response.choices[0].message.content.strip()
-        return answer
-    except Exception as e:
-        logging.error(f"Error during OpenAI API call: {e}")
-        return f"Error: {e}"
-
 def run_app():
-    """Run the Streamlit UI for PDF Extraction, Processing, and Chatbot."""
+    """Run the Streamlit UI for PDF Extraction and Processing."""
     st.title("PDF Extraction and Processing")
-    st.markdown("Enter a PDF URL or upload a PDF file from your local system. Then choose an output format or interact with the loaded PDF via chat.")
+    st.markdown("Enter a PDF URL or upload a PDF file from your local system. Then choose an output format.")
     
-    # Conversion options: five choices.
-    conversion_type = st.radio("Choose Option:", 
-                               options=["Convert to Excel (CSV)", "Convert to Excel (XLSX)", "Convert to Word", "Convert to Text", "Chat with PDF"])
+    # Conversion options: now four choices.
+    conversion_type = st.radio("Choose Conversion Option:", 
+                               options=["Convert to Excel (CSV)", "Convert to Excel (XLSX)", "Convert to Word", "Convert to Text"])
     
-    # Create two tabs: one for URL input and one for file upload.
+    # Create two tabs: one for URL input and one for local file upload.
     tab1, tab2 = st.tabs(["Extract from URL", "Upload PDF"])
     
-    tmp_path = None  # This will store the temporary file path for the processed PDF.
-    
-    # Process PDF via URL
+    # Tab 1: Extract from URL
     with tab1:
         pdf_url = st.text_input("Enter PDF URL:")
         if st.button("Process URL"):
             if pdf_url:
-                with st.spinner("Processing PDF from URL..."):
+                with st.spinner("Extracting text from URL..."):
                     extracted_text = extract_text_from_pdf_url(pdf_url)
-                st.session_state.pdf_text = extracted_text
-                if conversion_type in ["Convert to Text", "Chat with PDF"]:
+                if conversion_type == "Convert to Text":
                     st.text_area("Extracted Text", extracted_text, height=300)
                 else:
                     try:
@@ -231,31 +196,19 @@ def run_app():
                                 st.error(msg)
                     except Exception as e:
                         st.error(f"Error processing URL: {e}")
-                # Layout: Display PDF preview and chat history side-by-side.
+                # Display the PDF in an iframe
                 try:
                     with open(tmp_path, "rb") as pdf_file:
                         base64_pdf = base64.b64encode(pdf_file.read()).decode('utf-8')
                     pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="700" height="900" type="application/pdf"></iframe>'
-                    # Create two columns: left for PDF preview, right for chat history.
-                    col1, col2 = st.columns([2, 1])
-                    with col1:
-                        st.markdown("### PDF Preview", unsafe_allow_html=True)
-                        st.markdown(pdf_display, unsafe_allow_html=True)
-                    with col2:
-                        st.markdown("### Chat History")
-                        if "chat_history" not in st.session_state:
-                            st.session_state.chat_history = []
-                        for msg in st.session_state.chat_history:
-                            if msg["role"] == "user":
-                                st.chat_message("user").write(msg["content"])
-                            else:
-                                st.chat_message("assistant").write(msg["content"])
+                    st.markdown("### PDF Preview", unsafe_allow_html=True)
+                    st.markdown(pdf_display, unsafe_allow_html=True)
                 except Exception as e:
-                    st.error(f"Error displaying PDF or chat history: {e}")
+                    st.error(f"Error displaying PDF: {e}")
             else:
                 st.error("Please enter a valid PDF URL.")
     
-    # Process PDF via Upload
+    # Tab 2: Upload PDF
     with tab2:
         uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
         if uploaded_file is not None:
@@ -263,7 +216,7 @@ def run_app():
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                     tmp.write(uploaded_file.read())
                     tmp_path = tmp.name
-                if conversion_type in ["Convert to Text", "Chat with PDF"]:
+                if conversion_type == "Convert to Text":
                     with st.spinner("Extracting text from uploaded file..."):
                         with open(tmp_path, "rb") as f:
                             pdf_bytes = f.read()
@@ -274,7 +227,6 @@ def run_app():
                             lang_str = "+".join(['eng', 'jpn', 'chi_sim', 'kor'])
                             extracted_text = extract_ocr_text_from_pdf_bytes(pdf_bytes, lang=lang_str)
                     st.text_area("Extracted Text", extracted_text, height=300)
-                    st.session_state.pdf_text = extracted_text
                 elif conversion_type == "Convert to Excel (CSV)":
                     success, msg = convert_pdf_to_excel_csv(tmp_path, tmp_path + ".csv")
                     if success:
@@ -296,41 +248,17 @@ def run_app():
                             st.download_button("Download Word Document", f, file_name="converted_document.docx", on_click=noop)
                     else:
                         st.error(msg)
-                # Layout: Display PDF preview and chat history side-by-side.
+                # Display the uploaded PDF in an iframe
                 try:
                     with open(tmp_path, "rb") as pdf_file:
                         base64_pdf = base64.b64encode(pdf_file.read()).decode('utf-8')
                     pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="700" height="900" type="application/pdf"></iframe>'
-                    col1, col2 = st.columns([2, 1])
-                    with col1:
-                        st.markdown("### PDF Preview", unsafe_allow_html=True)
-                        st.markdown(pdf_display, unsafe_allow_html=True)
-                    with col2:
-                        st.markdown("### Chat History")
-                        if "chat_history" not in st.session_state:
-                            st.session_state.chat_history = []
-                        for msg in st.session_state.chat_history:
-                            if msg["role"] == "user":
-                                st.chat_message("user").write(msg["content"])
-                            else:
-                                st.chat_message("assistant").write(msg["content"])
+                    st.markdown("### PDF Preview", unsafe_allow_html=True)
+                    st.markdown(pdf_display, unsafe_allow_html=True)
                 except Exception as e:
-                    st.error(f"Error displaying PDF or chat history: {e}")
+                    st.error(f"Error displaying uploaded PDF: {e}")
             except Exception as e:
                 st.error(f"Error processing uploaded file: {e}")
-    
-    # Place the chat input outside any tabs or columns.
-    if conversion_type == "Chat with PDF":
-        if "pdf_text" not in st.session_state or not st.session_state.pdf_text:
-            st.info("Please process a PDF first to load its text for chat.")
-        else:
-            user_input = st.chat_input("Ask a question about the PDF:")
-            if user_input:
-                st.session_state.chat_history.append({"role": "user", "content": user_input})
-                with st.spinner("Generating response..."):
-                    answer = ask_pdf_question(st.session_state.pdf_text, user_input)
-                st.session_state.chat_history.append({"role": "assistant", "content": answer})
-                st.experimental_rerun()
 
 if __name__ == "__main__":
     run_app()

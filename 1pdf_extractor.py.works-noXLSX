@@ -14,6 +14,10 @@ import tempfile
 
 logging.basicConfig(level=logging.INFO)
 
+# Define a no-op callback function
+def noop():
+    pass
+
 def is_text_valid(text, threshold=0.1):
     """
     Check if the extracted text is likely valid by calculating the ratio 
@@ -123,12 +127,12 @@ def convert_pdf_to_excel(pdf_path, excel_path):
 def run_app():
     """Run the Streamlit UI for PDF Extraction and Processing."""
     st.title("PDF Extraction and Processing")
-    st.markdown("Enter a PDF URL or upload a PDF file from your local system. Then, choose an output format to convert the PDF into.")
-
+    st.markdown("Enter a PDF URL or upload a PDF file from your local system. Then choose an output format.")
+    
     # Conversion options
     conversion_type = st.radio("Choose Conversion Option:", options=["Convert to Excel (tables)", "Convert to Word", "Convert to Text"])
     
-    # Use tabs for URL vs file input
+    # Create two tabs: one for URL input and one for local file upload.
     tab1, tab2 = st.tabs(["Extract from URL", "Upload PDF"])
     
     # Tab 1: Extract from URL
@@ -141,7 +145,6 @@ def run_app():
                 if conversion_type == "Convert to Text":
                     st.text_area("Extracted Text", extracted_text, height=300)
                 else:
-                    # Save the downloaded PDF to a temporary file
                     try:
                         headers = {"User-Agent": "Mozilla/5.0"}
                         with httpx.Client(timeout=30, headers=headers) as client:
@@ -155,21 +158,21 @@ def run_app():
                             success, msg = convert_pdf_to_excel(tmp_path, tmp_path + ".csv")
                             if success:
                                 with open(tmp_path + ".csv", "rb") as f:
-                                    st.download_button("Download Excel (CSV)", f, file_name="converted_tables.csv")
+                                    st.download_button("Download Excel (CSV)", f, file_name="converted_tables.csv", on_click=noop)
                             else:
                                 st.error(msg)
                         elif conversion_type == "Convert to Word":
                             success, msg = convert_pdf_to_docx(tmp_path, tmp_path + ".docx")
                             if success:
                                 with open(tmp_path + ".docx", "rb") as f:
-                                    st.download_button("Download Word Document", f, file_name="converted_document.docx")
+                                    st.download_button("Download Word Document", f, file_name="converted_document.docx", on_click=noop)
                             else:
                                 st.error(msg)
                     except Exception as e:
                         st.error(f"Error processing URL: {e}")
             else:
                 st.error("Please enter a valid PDF URL.")
-
+    
     # Tab 2: Upload PDF
     with tab2:
         uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
@@ -179,23 +182,28 @@ def run_app():
                     tmp.write(uploaded_file.read())
                     tmp_path = tmp.name
                 if conversion_type == "Convert to Text":
-                    # For local file extraction, we read the file bytes and extract text
-                    with open(tmp_path, "rb") as f:
-                        pdf_bytes = f.read()
-                    extracted_text = extract_text_from_pdf_url("file://" + tmp_path, languages=['eng', 'jpn', 'chi_sim', 'kor'])
+                    with st.spinner("Extracting text from uploaded file..."):
+                        with open(tmp_path, "rb") as f:
+                            pdf_bytes = f.read()
+                        native_text = extract_native_text_from_pdf_bytes(pdf_bytes)
+                        if native_text and len(native_text) > 50 and is_text_valid(native_text):
+                            extracted_text = native_text
+                        else:
+                            lang_str = "+".join(['eng', 'jpn', 'chi_sim', 'kor'])
+                            extracted_text = extract_ocr_text_from_pdf_bytes(pdf_bytes, lang=lang_str)
                     st.text_area("Extracted Text", extracted_text, height=300)
                 elif conversion_type == "Convert to Excel (tables)":
                     success, msg = convert_pdf_to_excel(tmp_path, tmp_path + ".csv")
                     if success:
                         with open(tmp_path + ".csv", "rb") as f:
-                            st.download_button("Download Excel (CSV)", f, file_name="converted_tables.csv")
+                            st.download_button("Download Excel (CSV)", f, file_name="converted_tables.csv", on_click=noop)
                     else:
                         st.error(msg)
                 elif conversion_type == "Convert to Word":
                     success, msg = convert_pdf_to_docx(tmp_path, tmp_path + ".docx")
                     if success:
                         with open(tmp_path + ".docx", "rb") as f:
-                            st.download_button("Download Word Document", f, file_name="converted_document.docx")
+                            st.download_button("Download Word Document", f, file_name="converted_document.docx", on_click=noop)
                     else:
                         st.error(msg)
             except Exception as e:
