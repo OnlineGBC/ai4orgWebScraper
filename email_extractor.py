@@ -185,6 +185,13 @@ def parse_msg(file_bytes, file_name):
     details["html_body"] = msg.htmlBody if hasattr(msg, "htmlBody") else None
     details["plain_body"] = msg.body or "No content available."
 
+    # Ensure we're dealing with string types before normalizing
+    if isinstance(details["plain_body"], bytes):
+        details["plain_body"] = details["plain_body"].decode('utf-8', errors='ignore')
+    
+    if details["html_body"] and isinstance(details["html_body"], bytes):
+        details["html_body"] = details["html_body"].decode('utf-8', errors='ignore')
+    
     # Normalize text content using char_text_norm
     details["plain_body"] = char_text_norm.normalize_text(details["plain_body"])
     if details["html_body"]:
