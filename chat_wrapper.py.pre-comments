@@ -1,17 +1,10 @@
-# This script creates a smart chat tool that helps users dig into a collection of pre-gathered text data (like company info scraped from websites).
-# Imagine you’ve collected a big pile of documents about a company, and you want to quickly find details about its top leaders—like the CEO or CFO—without searching the internet again.
-# The tool breaks that pile into smaller, manageable pieces, uses artificial intelligence (AI) to understand what’s in each piece, and lets you ask follow-up questions.
-# It’s like having a super-smart assistant who knows the documents inside out and can pull out just the right info—like names, job titles, or contact details—based on what you ask.
-# The chat also tries to guess what you mean by tricky abbreviations (like "CSO") by looking at the words around them, making sure it finds the most relevant answers.
-
-import streamlit as st  # Library to build an interactive web app
-import openai  # Library to interact with OpenAI's AI models
-import json  # Library to handle JSON data (not used here but imported)
-import numpy as np  # Library for math operations on arrays (like vectors)
-import re  # Library for working with text patterns (not used here but imported)
-from datetime import datetime  # Library for handling dates/times (not used here but imported)
-from config import OPENAI_CLIENT  # Custom file storing the OpenAI connection setup
-
+import streamlit as st
+import openai
+import json
+import numpy as np
+import re
+from datetime import datetime
+from config import OPENAI_CLIENT
 
 # --- Query rewriting utility ---
 def expand_query(query: str) -> str:
@@ -24,7 +17,8 @@ def expand_query(query: str) -> str:
        If multiple expansions match or there's no context, optionally append all expansions.
     This helps align the user's question with how the data might appear in the RAG corpus.
     """
-    # Dictionary for simple, clear acronym expansions
+
+    # Dictionary for unambiguous expansions
     ACRONYM_SINGLE_MAP = {
         "CEO": "Chief Executive Officer",
         "CFO": "Chief Financial Officer",
@@ -35,7 +29,8 @@ def expand_query(query: str) -> str:
         "CHRO": "Chief Human Resources Officer",
     }
 
-    # Dictionary for acronyms with multiple meanings, paired with clue words
+    # Dictionary mapping each ambiguous acronym to possible expansions
+    # each with hint words that help us disambiguate
     ACRONYM_AMBIGUOUS_MAP = {
         "CDO": [
             ("Chief Data Officer", ["data", "analytics", "big data", "etl", "database"]),
@@ -52,62 +47,65 @@ def expand_query(query: str) -> str:
         ]
     }
 
-    expanded_query = query  # Start with the original question
-    lower_query = query.lower()  # Convert to lowercase for easier matching
+    expanded_query = query
+    lower_query = query.lower()
 
-    # Add full titles or acronyms for clear-cut cases (e.g., "CEO")
+    # ---------------- Unambiguous expansions ----------------
     for acronym, full_title in ACRONYM_SINGLE_MAP.items():
+        # If acronym is present but the full title is not, add the full title
         if acronym.lower() in lower_query and full_title.lower() not in lower_query:
-            expanded_query += f" {full_title}"  # Add full title if acronym is used
+            expanded_query += f" {full_title}"
+        # If the full title is present but not the acronym, add the acronym
         if full_title.lower() in lower_query and acronym.lower() not in lower_query:
-            expanded_query += f" {acronym}"  # Add acronym if full title is used
+            expanded_query += f" {acronym}"
 
-    # Handle trickier acronyms with multiple meanings (e.g., "CSO")
+    # ---------------- Ambiguous expansions ----------------
     for acronym, expansions in ACRONYM_AMBIGUOUS_MAP.items():
+        # Check if the acronym is present in the query
         if acronym.lower() in lower_query:
             matched_expansions = []
-            # Check for clue words to pick the right meaning
+            # For each possible meaning, see if any hint words appear
             for (title, hint_words) in expansions:
                 if any(hint in lower_query for hint in hint_words):
                     matched_expansions.append(title)
             if matched_expansions:
-                # Add all matched titles (e.g., if "security" fits "CSO")
+                # If we found one or more matches, add them all (some contexts might overlap)
                 for title in matched_expansions:
                     if title.lower() not in lower_query:
                         expanded_query += f" {title}"
             else:
-                # No clues? Add all possible meanings
+                # No disambiguating words found -> optionally add ALL expansions
                 for (title, _) in expansions:
                     if title.lower() not in lower_query:
                         expanded_query += f" {title}"
         else:
-            # If full title is used, add the acronym too
+            # The user didn't explicitly mention the acronym, but maybe spelled out the full title
             for (title, hint_words) in expansions:
                 if title.lower() in lower_query and acronym.lower() not in lower_query:
                     expanded_query += f" {acronym}"
 
-    return expanded_query  # Return the beefed-up question
+    return expanded_query
 
+# --- Helper functions for RAG ---
 
-# --- Helper functions for RAG (Retrieval-Augmented Generation) ---
 def split_text_into_chunks(text, chunk_size=2000):
-    # Break big text into smaller pieces (about 2000 characters each)
-    paragraphs = text.split("\n\n")  # Split by blank lines
+    paragraphs = text.split("\n\n")
     chunks = []
     current_chunk = ""
     for para in paragraphs:
         if current_chunk:
-            candidate = current_chunk + "\n\n" + para  # Try adding paragraph
+            candidate = current_chunk + "\n\n" + para
         else:
             candidate = para
         if len(candidate) > chunk_size and current_chunk:
-            chunks.append(current_chunk.strip())  # Save full chunk
-            current_chunk = para  # Start new chunk
+            # Current chunk is full; start a new chunk
+            chunks.append(current_chunk.strip())
+            current_chunk = para
         else:
             current_chunk = candidate
     if current_chunk:
-        chunks.append(current_chunk.strip())  # Add last chunk
-    # Double-check no piece is too long, split further if needed
+        chunks.append(current_chunk.strip())
+    # Now ensure no chunk exceeds chunk_size by splitting at neat boundaries
     final_chunks = []
     for chunk in chunks:
         if len(chunk) <= chunk_size:
@@ -115,145 +113,140 @@ def split_text_into_chunks(text, chunk_size=2000):
         else:
             start = 0
             while start < len(chunk):
+                # Try to cut at a newline boundary within the next chunk_size characters
                 end = min(start + chunk_size, len(chunk))
                 if end < len(chunk):
                     newline_idx = chunk.rfind("\n", start, end)
                     if newline_idx != -1 and newline_idx > start:
-                        end = newline_idx  # Cut at a clean break
+                        end = newline_idx  # break at the last newline within the limit
                 final_chunks.append(chunk[start:end].strip())
                 start = end
     return final_chunks
 
-
 def get_embedding(text):
     """
-    Turn text into a numerical "fingerprint" (embedding) using OpenAI's AI.
-    This helps the computer understand and compare text meanings.
+    Retrieve the embedding for a given text using OpenAI's Embedding API.
+    Using model "text-embedding-ada-002" for embeddings.
     """
     response = OPENAI_CLIENT.embeddings.create(
-        model="text-embedding-ada-002",  # Specific AI model for embeddings
+        model="text-embedding-ada-002",
         input=text
     )
-    return response.data[0].embedding  # Return the fingerprint
-
+    return response.data[0].embedding
 
 def cosine_similarity(vec1, vec2):
     """
-    Measure how similar two text fingerprints are (closer to 1 = more similar).
+    Compute cosine similarity between two vectors.
     """
-    vec1 = np.array(vec1)  # Convert to math-friendly format
+    vec1 = np.array(vec1)
     vec2 = np.array(vec2)
-    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2) + 1e-10)  # Math formula for similarity
-
+    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2) + 1e-10)
 
 def build_vector_store(text):
     """
-    Break text into chunks and create fingerprints for each one.
-    Stores them in a list for quick lookup later.
+    Given a large text, split it into chunks and compute embeddings for each chunk.
+    Returns a list of dictionaries with keys "embedding" and "text".
     """
     chunks = split_text_into_chunks(text, chunk_size=2000)
     vector_store = []
     for chunk in chunks:
-        embedding = get_embedding(chunk)  # Get fingerprint
-        vector_store.append({"embedding": embedding, "text": chunk})  # Save with text
+        embedding = get_embedding(chunk)
+        vector_store.append({"embedding": embedding, "text": chunk})
     return vector_store
-
 
 def retrieve_relevant_context(query, vector_store, top_k=10, similarity_threshold=0.3):
     """
-    Find the most relevant text chunks for a question by comparing fingerprints.
-    Returns a big string of the best matches.
+    Given a query and a vector store, compute the query's embedding,
+    compare it against each stored chunk, and return the top_k most relevant segments.
+    
+    :param query: The user query string
+    :param vector_store: A list of dicts with "embedding" and "text" keys
+    :param top_k: Number of chunks to return after filtering/sorting
+    :param similarity_threshold: Chunks below this cosine similarity score are dropped
+    :return: A single string concatenating the most relevant chunk texts
     """
-    query_embedding = get_embedding(query)  # Fingerprint the question
+    query_embedding = get_embedding(query)
     scored_chunks = []
+    
     for item in vector_store:
-        score = cosine_similarity(query_embedding, item["embedding"])  # Compare to each chunk
+        score = cosine_similarity(query_embedding, item["embedding"])
         scored_chunks.append((score, item["text"]))
-    scored_chunks.sort(key=lambda x: x[0], reverse=True)  # Sort by best match
-    filtered_chunks = [(score, text) for (score, text) in scored_chunks if score >= similarity_threshold]  # Drop weak matches
-    top_chunks = [text for score, text in filtered_chunks[:top_k]]  # Take top matches
-    return "\n".join(top_chunks)  # Combine into one string
 
+    # Sort chunks by descending similarity
+    scored_chunks.sort(key=lambda x: x[0], reverse=True)
+
+    # Filter out low-similarity chunks
+    filtered_chunks = [(score, text) for (score, text) in scored_chunks if score >= similarity_threshold]
+    
+    # Take top_k after filtering
+    top_chunks = [text for score, text in filtered_chunks[:top_k]]
+    
+    return "\n".join(top_chunks)
 
 # --- Main Chat Function with RAG Integration ---
+
 def run_chat():
-    # Secret instructions for the AI on what to focus on
+    # Hidden system prompt; not shown in UI.
     system_prompt = (
         "Act like an experienced marketer and data miner and look for information on senior leadership, "
         "like the Founder or Co-Founder, CEO, CFO, other C-level officers, or the Board of Directors, along with their names, titles, and social media or other contact details.  "
         "If senior leadership is not found, get the top 10 team members by title.  Only get information from your RAG and internal data.  Do not search the Internet or any public sources."
     )
-
-    # Backup question if the user doesn’t ask anything
+    
+    # Default query text used internally if no user input is given.
     default_query = (
         "Act like an experienced marketer and data miner and look for information on senior leadership, "
         "like the Founder or Co-Founder, CEO, CFO, other C-level officers, or the Board of Directors, along with their names, titles, and social media or other contact details.  "
         "If senior leadership is not found, get the top 10 team members by title.  Only get information from your RAG and internal data.  Do not search the Internet or any public sources."
     )
-
-    # Set up a place to store chat messages if it’s the first run
+    
+    # Initialize conversation history if it doesn't exist.
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
-
-    # Check if the AI connection is ready
+    
     if not getattr(OPENAI_CLIENT, "api_key", None):
-        st.error("OPENAI API key is not set in OPENAI_CLIENT.")  # Show error if not
-
-    # Make sure there’s text data to work with
+        st.error("OPENAI API key is not set in OPENAI_CLIENT.")
+    
+    # Check that crawled_text exists and is non-empty.
     if "crawled_text" not in st.session_state or not st.session_state.crawled_text.strip():
         st.error("No crawled text data available. Please ensure that the crawled_text variable is populated.")
         return
-
-    # Process the text data into chunks and fingerprints if not done yet
+    
+    # Build vector store from crawled_text if not already processed.
     if "vector_store" not in st.session_state:
-        with st.spinner("Processing crawled text for retrieval..."):  # Show a loading sign
+        with st.spinner("Processing crawled text for retrieval..."):
             st.session_state.vector_store = build_vector_store(st.session_state.crawled_text)
-
-    st.markdown("### Follow-up Chat")  # Add a title to the chat section
-
-    # Show all past messages in the chat
+    
+    st.markdown("### Follow-up Chat")
+    
+    # Display chat history.
     for msg in st.session_state.chat_history:
         if msg["role"] == "assistant":
-            st.chat_message("assistant").write(msg["content"])  # Show AI replies
+            st.chat_message("assistant").write(msg["content"])
         elif msg["role"] == "user":
-            st.chat_message("user").write(msg["content"])  # Show user questions
-
-    # If it’s the first time, answer the default question automatically
+            st.chat_message("user").write(msg["content"])
+    
+    # If no chat history exists (first run), generate an initial response using default_query
+    # without adding the default query to the visible chat history.
     if not st.session_state.chat_history:
+        # Retrieve context for the default query, if possible
+
         if "vector_store" in st.session_state:
-            retrieved_context = retrieve_relevant_context(default_query, st.session_state.vector_store, top_k=10)  # Find relevant text
+            retrieved_context = retrieve_relevant_context(default_query, st.session_state.vector_store, top_k=10)
         else:
             retrieved_context = ""
+        
+        # Merge system prompt and retrieved context into a single system message
         system_content = system_prompt
         if retrieved_context:
-            system_content += f"\n\nRelevant context:\n{retrieved_context}"  # Add found text to instructions
-        messages = [{"role": "system", "content": system_content}]
-        messages.append({"role": "user", "content": default_query})  # Pretend user asked the default
-        with st.spinner("Generating response..."):
-            response = OPENAI_CLIENT.chat.completions.create(
-                model="chatgpt-4o-latest",  # Use latest ChatGPT model
-                messages=messages,
-                temperature=0.7,  # Control creativity (0 = strict, 1 = wild)
-                max_tokens=500  # Limit reply length
-            )
-            assistant_response = response.choices[0].message.content.strip()
-        st.session_state.chat_history.append({"role": "assistant", "content": assistant_response})
-        st.experimental_rerun()  # Refresh the page to show the reply
+            system_content += f"\n\nRelevant context:\n{retrieved_context}"
 
-    # Let the user type a new question
-    user_input = st.chat_input("Ask a follow-up question about the crawled content:")
-    if user_input:
-        st.session_state.chat_history.append({"role": "user", "content": user_input})  # Save question
-        expanded_user_input = expand_query(user_input)  # Add extra terms to the question
-        if "vector_store" in st.session_state:
-            retrieved_context = retrieve_relevant_context(expanded_user_input, st.session_state.vector_store, top_k=10)  # Find relevant text
-        else:
-            retrieved_context = ""
-        merged_system_content = system_prompt
-        if retrieved_context:
-            merged_system_content += f"\n\nRelevant context:\n{retrieved_context}"  # Add found text
-        messages = [{"role": "system", "content": merged_system_content}]
-        messages.extend(st.session_state.chat_history)  # Include past chat
+        # Now build the messages list with a single system message
+        messages = []
+        messages.append({"role": "system", "content": system_content})
+        # Present the default_query as a user question in conversation
+        messages.append({"role": "user", "content": default_query})        
+
         with st.spinner("Generating response..."):
             response = OPENAI_CLIENT.chat.completions.create(
                 model="chatgpt-4o-latest",
@@ -263,8 +256,39 @@ def run_chat():
             )
             assistant_response = response.choices[0].message.content.strip()
         st.session_state.chat_history.append({"role": "assistant", "content": assistant_response})
-        st.experimental_rerun()  # Refresh to show the new reply
+        st.experimental_rerun()
+    
+    # Accept new user input via st.chat_input.
+    user_input = st.chat_input("Ask a follow-up question about the crawled content:")
+    if user_input:
+        st.session_state.chat_history.append({"role": "user", "content": user_input})
 
+        # --- Use the expand_query() function to add synonyms ---
+        # This ensures the retrieval step sees extra relevant terms.
+        expanded_user_input = expand_query(user_input)
+
+        if "vector_store" in st.session_state:
+            retrieved_context = retrieve_relevant_context(expanded_user_input, st.session_state.vector_store, top_k=10)
+        else:
+            retrieved_context = ""
+        
+        # Build a single system message that merges instructions + context
+        merged_system_content = system_prompt
+        if retrieved_context:
+            merged_system_content += f"\n\nRelevant context:\n{retrieved_context}"
+        messages = [ {"role": "system", "content": merged_system_content} ]
+        messages.extend(st.session_state.chat_history)
+        
+        with st.spinner("Generating response..."):
+            response = OPENAI_CLIENT.chat.completions.create(
+                model="chatgpt-4o-latest",
+                messages=messages,
+                temperature=0.7,
+                max_tokens=500
+            )
+            assistant_response = response.choices[0].message.content.strip()
+        st.session_state.chat_history.append({"role": "assistant", "content": assistant_response})
+        st.experimental_rerun()
 
 if __name__ == "__main__":
-    run_chat()  # Start the chat tool
+    run_chat()

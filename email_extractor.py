@@ -1,52 +1,58 @@
 # email_extractor.py
-import streamlit as st
-import inspect
-import os
-import char_text_norm
-import re
-import json
-import csv
-import io
-import tempfile
-import email
-from email import policy
-from email.parser import BytesParser
+# This script creates a Streamlit app to upload, parse, and analyze email files (.eml or .msg).
+# It extracts details like sender, subject, and attachments, groups emails into threads, and offers export options (JSON, CSV, PDF).
+# Features include sentiment analysis, content safety checks, and text normalization for better display.
 
-import extract_msg  # pip install extract-msg
-from fpdf import FPDF  # pip install fpdf
-import nltk
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
+import streamlit as st  # Web app framework for interactive UI
+import inspect  # Used to get line numbers for debugging
+import os  # For file operations like removing temp files
+import char_text_norm as char_text_norm  # Custom module to clean up text
+import re  # Regular expressions for text processing
+import json  # For JSON export
+import csv  # For CSV export
+import io  # For in-memory file handling
+import tempfile  # For temporary file creation
+import email  # Built-in email parsing library
+from email import policy  # Email parsing policy
+from email.parser import BytesParser  # Parser for email bytes
 
-# Ensure nltk vader_lexicon is downloaded
+import extract_msg  # Library to parse .msg files (Outlook format)
+from fpdf import FPDF  # Library to generate PDF reports
+import nltk  # Natural language toolkit for sentiment analysis
+from nltk.sentiment.vader import SentimentIntensityAnalyzer  # VADER sentiment analyzer
+
+# Ensure nltk vader_lexicon is downloaded for sentiment analysis
 try:
     nltk.data.find("sentiment/vader_lexicon.zip")
 except LookupError:
-    nltk.download("vader_lexicon")
+    nltk.download("vader_lexicon")  # Download if missing
 
 # Initialize sentiment analyzer
 sia = SentimentIntensityAnalyzer()
 
 def log_debug(msg):
-    # Retrieve the caller's line number using the inspect module.
+    # Log debug messages with the line number of the caller
     line_no = inspect.currentframe().f_back.f_lineno
-    st.write(f"DEBUG (line {line_no}): {msg}")
+    # st.write(f"DEBUG (line {line_no}): {msg}")  # Commented out for later use
 
 # Helper: Normalize subject by removing common prefixes
 def normalize_subject(subject):
+    # Clean up email subject for consistent threading
     if subject:
         subject = subject.lower()
-        subject = re.sub(r'^(re:|fwd:)\s*', '', subject)
+        subject = re.sub(r'^(re:|fwd:)\s*', '', subject)  # Remove "re:" or "fwd:"
         return subject.strip()
     return "no subject"
 
 # Helper: Simple summarization (naive implementation)
 def summarize_text(text, max_length=200):
+    # Shorten text to a manageable length with ellipsis if needed
     if text and len(text) > max_length:
         return text[:max_length] + "..."
     return text
 
 """ 
-Option 1 below code manages the conversions but display is not great.  This is currently disabled
+Option 1 below code manages the conversions but display is not great. This is currently disabled
 def is_content_safe(content):
     if content:
         try:
@@ -61,7 +67,7 @@ def is_content_safe(content):
 """
 
 """ 
-Option 2 below code manages the conversions but display should be better.  This is currently enabled
+Option 2 below code manages the conversions but display should be better. This is currently enabled
 """ 
 def is_content_safe(content):
     """
@@ -74,22 +80,23 @@ def is_content_safe(content):
             try:
                 check = content.decode('utf-8', errors='ignore').lower()
             except Exception:
-                check = ""
+                check = ""  # Fallback to empty string if decoding fails
         else:
             check = content.lower()
-        if "<script" in check or "javascript:" in check:
+        if "<script" in check or "javascript:" in check:  # Look for potential scripts
             return False
     return True
 
 # Helper: Parse attachments for eml messages
 def extract_attachments_eml(msg_obj):
+    # Extract attachment details from .eml files
     attachments = []
-    for part in msg_obj.walk():
+    for part in msg_obj.walk():  # Walk through all parts of the email
         content_disp = part.get("Content-Disposition", "")
         if content_disp and "attachment" in content_disp.lower():
-            filename = part.get_filename() or "attachment"
-            payload = part.get_payload(decode=True)
-            mime = part.get_content_type()
+            filename = part.get_filename() or "attachment"  # Default name if none found
+            payload = part.get_payload(decode=True)  # Get binary content
+            mime = part.get_content_type()  # MIME type of the attachment
             attachments.append({
                 "filename": filename,
                 "content": payload,
@@ -99,14 +106,14 @@ def extract_attachments_eml(msg_obj):
 
 # Helper: Parse attachments for msg messages using extract_msg
 def extract_attachments_msg(msg):
+    # Extract attachment details from .msg files
     attachments = []
     for att in msg.attachments:
-        # Each attachment has attributes like longFilename, data, etc.
-        filename = att.longFilename or att.shortFilename or "attachment"
-        content = att.data
-        # Attempt to guess mime type from extension (basic)
+        filename = att.longFilename or att.shortFilename or "attachment"  # Pick best filename
+        content = att.data  # Binary content
+        # Guess MIME type based on file extension
         ext = os.path.splitext(filename)[1].lower()
-        mime = "application/octet-stream"
+        mime = "application/octet-stream"  # Default MIME
         if ext in [".jpg", ".jpeg"]:
             mime = "image/jpeg"
         elif ext == ".png":
@@ -122,6 +129,7 @@ def extract_attachments_msg(msg):
 
 # Parse .eml files using built-in email package
 def parse_eml(file_bytes):
+    # Parse an .eml file and extract its metadata and content
     msg = BytesParser(policy=policy.default).parsebytes(file_bytes)
     details = {
         "subject": msg.get("subject", "No Subject"),
@@ -137,35 +145,36 @@ def parse_eml(file_bytes):
 
     html_body = None
     plain_body = None
-    if msg.is_multipart():
+    if msg.is_multipart():  # Handle multi-part emails
         for part in msg.walk():
             ctype = part.get_content_type()
             if ctype == "text/html" and html_body is None:
                 html_body = part.get_content()
             elif ctype == "text/plain" and plain_body is None:
                 plain_body = part.get_content()
-    else:
+    else:  # Single-part email
         ctype = msg.get_content_type()
         if ctype == "text/html":
             html_body = msg.get_content()
         else:
             plain_body = msg.get_content()
     
-    # Normalize text content using char_text_norm
+    # Normalize text content for consistency
     details["plain_body"] = char_text_norm.normalize_text(plain_body or "No content available.")
     if html_body:
         details["html_body"] = char_text_norm.normalize_text(html_body)
     else:
         details["html_body"] = None
 
-    sentiment = sia.polarity_scores(details["plain_body"])
+    sentiment = sia.polarity_scores(details["plain_body"])  # Analyze sentiment
     details["sentiment"] = sentiment
-    details["summary"] = summarize_text(details["plain_body"])
-    details["is_safe"] = is_content_safe(details["plain_body"])
+    details["summary"] = summarize_text(details["plain_body"])  # Summarize content
+    details["is_safe"] = is_content_safe(details["plain_body"])  # Check safety
     
     return details
 
 def parse_msg(file_bytes, file_name):
+    # Parse an .msg file using a temporary file
     with tempfile.NamedTemporaryFile(delete=False, suffix=".msg") as temp_file:
         temp_file.write(file_bytes)
         temp_path = temp_file.name
@@ -185,7 +194,14 @@ def parse_msg(file_bytes, file_name):
     details["html_body"] = msg.htmlBody if hasattr(msg, "htmlBody") else None
     details["plain_body"] = msg.body or "No content available."
 
-    # Normalize text content using char_text_norm
+    # Convert bytes to string if necessary
+    if isinstance(details["plain_body"], bytes):
+        details["plain_body"] = details["plain_body"].decode('utf-8', errors='ignore')
+    
+    if details["html_body"] and isinstance(details["html_body"], bytes):
+        details["html_body"] = details["html_body"].decode('utf-8', errors='ignore')
+    
+    # Normalize text content
     details["plain_body"] = char_text_norm.normalize_text(details["plain_body"])
     if details["html_body"]:
         details["html_body"] = char_text_norm.normalize_text(details["html_body"])
@@ -195,64 +211,123 @@ def parse_msg(file_bytes, file_name):
     details["summary"] = summarize_text(details["plain_body"])
     details["is_safe"] = is_content_safe(details["plain_body"])
     
-    os.remove(temp_path)
+    os.remove(temp_path)  # Clean up temp file
     return details
 
 # Function to export emails data to JSON
 def export_to_json(data):
-    json_data = json.dumps(data, indent=4)
+    # Export email data as JSON, excluding binary content
+    export_data = []
+    for email_item in data:
+        email_copy = {}
+        for key, value in email_item.items():
+            if key == "attachments":
+                # Include attachment metadata, skip binary content
+                cleaned_attachments = []
+                for att in value:
+                    att_copy = {k: v for k, v in att.items() if k != "content"}
+                    cleaned_attachments.append(att_copy)
+                email_copy[key] = cleaned_attachments
+            elif not isinstance(value, bytes):  # Skip binary data
+                email_copy[key] = value
+        export_data.append(email_copy)
+    
+    json_data = json.dumps(export_data, indent=4, default=str)  # Handle non-JSON-serializable objects
     return json_data
 
 # Function to export emails data to CSV (flattened)
 def export_to_csv(data):
+    # Export email data as a flat CSV table
     output = io.StringIO()
     writer = csv.writer(output)
-    # Write header row (choose some representative keys)
-    header = ["Subject", "From", "To", "Date", "Summary"]
+    header = ["Subject", "From", "To", "CC", "Date", "Message ID", "Summary", "Sentiment Compound"]
     writer.writerow(header)
     for email_item in data:
+        sentiment_value = email_item.get("sentiment", {}).get("compound", 0) if isinstance(email_item.get("sentiment"), dict) else 0
         writer.writerow([
             email_item.get("subject", ""),
             email_item.get("from", ""),
             email_item.get("to", ""),
+            email_item.get("cc", ""),
             email_item.get("date", ""),
-            email_item.get("summary", "")
+            email_item.get("message_id", ""),
+            email_item.get("summary", ""),
+            sentiment_value
         ])
     return output.getvalue()
 
 # Function to export emails data to a PDF report using fpdf
 def export_to_pdf(data):
+    # Generate a PDF report summarizing email data
     pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    for email_item in data:
-        pdf.cell(200, 10, txt=f"Subject: {email_item.get('subject', '')}", ln=1)
-        pdf.cell(200, 10, txt=f"From: {email_item.get('from', '')}", ln=1)
-        pdf.cell(200, 10, txt=f"To: {email_item.get('to', '')}", ln=1)
-        pdf.cell(200, 10, txt=f"Date: {email_item.get('date', '')}", ln=1)
-        pdf.multi_cell(0, 10, txt=f"Summary: {email_item.get('summary', '')}")
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "Email Analysis Report", ln=1, align="C")
+    pdf.ln(5)
+    
+    for idx, email_item in enumerate(data, 1):
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 10, f"Email {idx}: {email_item.get('subject', 'No Subject')}", ln=1)
+        pdf.set_font("Arial", "", 10)
+        pdf.cell(0, 8, f"From: {email_item.get('from', '')}", ln=1)
+        pdf.cell(0, 8, f"To: {email_item.get('to', '')}", ln=1)
+        pdf.cell(0, 8, f"Date: {email_item.get('date', '')}", ln=1)
+        
+        # Add sentiment score if available
+        sentiment = email_item.get("sentiment", {})
+        if isinstance(sentiment, dict) and "compound" in sentiment:
+            pdf.cell(0, 8, f"Sentiment Score: {sentiment['compound']:.2f}", ln=1)
+        
+        # Add summary
+        pdf.set_font("Arial", "B", 10)
+        pdf.cell(0, 8, "Summary:", ln=1)
+        pdf.set_font("Arial", "", 10)
+        summary = email_item.get("summary", "No summary available")
+        pdf.multi_cell(0, 8, summary)
+        
+        # List attachments
+        attachments = email_item.get("attachments", [])
+        if attachments:
+            pdf.set_font("Arial", "B", 10)
+            pdf.cell(0, 8, f"Attachments: {len(attachments)}", ln=1)
+            pdf.set_font("Arial", "", 10)
+            for att in attachments:
+                pdf.cell(0, 8, f"- {att.get('filename', 'Unknown')}", ln=1)
+        
         pdf.ln(5)
+        pdf.cell(0, 0, "", ln=1)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())  # Separator line
+        pdf.ln(5)
+    
     pdf_output = io.BytesIO()
-    pdf_str = pdf.output(dest='S')
-    if isinstance(pdf_str, str):
-        pdf_output.write(pdf_str.encode('latin1'))
-    else:
-        pdf_output.write(pdf_str)
-    pdf_output.seek(0)
-    return pdf_output
+    try:
+        pdf_str = pdf.output(dest='S')  # Get PDF as string or bytes
+        if isinstance(pdf_str, str):
+            pdf_output.write(pdf_str.encode('latin1'))  # Encode string to bytes
+        else:
+            pdf_output.write(pdf_str)  # Write bytes directly
+        pdf_output.seek(0)
+        return pdf_output
+    except Exception as e:
+        st.error(f"Error generating PDF: {e}")
+        return io.BytesIO(b"Error generating PDF")
 
 # The main run_app() function that encapsulates the Streamlit UI
 def run_app():
+    # Main function to run the Streamlit email processing app
     try:
         log_debug("run_app() started")
         if "emails_history" not in st.session_state:
-            st.session_state.emails_history = []
+            st.session_state.emails_history = []  # Store parsed emails
+            st.session_state.processed_files = set()  # Track processed files to avoid duplicates
         log_debug("Session history initialized")
 
         st.sidebar.header("Email Upload & Filters")
         uploaded_files = st.sidebar.file_uploader("Upload email files (.eml or .msg)", type=["eml", "msg"], accept_multiple_files=True)
         log_debug("File uploader created")
 
+        # Sidebar filters for searching emails
         filter_subject = st.sidebar.text_input("Filter by subject")
         filter_sender = st.sidebar.text_input("Filter by sender")
         filter_date = st.sidebar.text_input("Filter by date (YYYY-MM-DD)")
@@ -261,11 +336,17 @@ def run_app():
         st.title("Advanced Email Parser and Processor")
         log_debug("Title set")
 
-        parsed_emails = []  # temporary list for current batch
+        parsed_emails = []  # Temporary list for current batch
 
         if uploaded_files:
             for uploaded_file in uploaded_files:
-                st.write(f"DEBUG: Processing file: {uploaded_file.name}")
+                # Skip already processed files
+                file_identifier = f"{uploaded_file.name}_{uploaded_file.size}"
+                if file_identifier in st.session_state.processed_files:
+                #    st.info(f"Skipping already processed file: {uploaded_file.name}")
+                    continue
+                
+                # st.write(f"DEBUG: Processing file: {uploaded_file.name}")  # Commented out for later use
                 file_bytes = uploaded_file.read()
                 file_name = uploaded_file.name.lower()
                 if not (file_name.endswith(".eml") or file_name.endswith(".msg")):
@@ -275,25 +356,33 @@ def run_app():
                 try:
                     if file_name.endswith(".eml"):
                         details = parse_eml(file_bytes)
-                    else:
+                    else:  # .msg file
                         details = parse_msg(file_bytes, file_name)
+                        
                     details["filename"] = uploaded_file.name
-                    # Add normalized subject for grouping (threading)
-                    details["norm_subject"] = normalize_subject(details.get("subject"))
+                    details["norm_subject"] = normalize_subject(details.get("subject"))  # For threading
                     parsed_emails.append(details)
                     st.session_state.emails_history.append(details)
+                    st.session_state.processed_files.add(file_identifier)  # Mark as processed
                     log_debug(f"Processed file {uploaded_file.name}")
                 except Exception as e:
                     st.error(f"Error processing {uploaded_file.name}: {e}")
-                    st.write(f"DEBUG: Error processing {uploaded_file.name}: {e}")
+                    # st.write(f"DEBUG: Error processing {uploaded_file.name}: {e}")  # Commented out for later use
 
+        # Group emails into threads by normalized subject
         threads = {}
         for email_item in st.session_state.emails_history:
             key = email_item.get("norm_subject", "no subject")
-            threads.setdefault(key, []).append(email_item)
+            if key not in threads:
+                threads[key] = []
+            # Avoid duplicate emails in a thread
+            message_id = email_item.get("message_id", "")
+            if not any(e.get("message_id", "") == message_id for e in threads[key]):
+                threads[key].append(email_item)
         log_debug("Grouped emails into threads")
 
         def thread_matches(thread_emails, subject_filter, sender_filter, date_filter):
+            # Check if a thread matches the filters
             for email_item in thread_emails:
                 if subject_filter and subject_filter.lower() not in email_item.get("subject", "").lower():
                     continue
@@ -304,6 +393,7 @@ def run_app():
                 return True
             return False
 
+        # Apply filters to threads
         filtered_threads = {}
         for key, emails in threads.items():
             if thread_matches(emails, filter_subject, filter_sender, filter_date):
@@ -318,34 +408,44 @@ def run_app():
                 with st.expander(f"Thread: {emails[0].get('subject', 'No Subject')} (Total emails: {len(emails)})"):
                     for idx, email_item in enumerate(emails, start=1):
                         st.markdown(f"#### Email {idx} - {email_item.get('subject')}")
-                        st.write(f"**From:** {email_item.get('from')}")
-                        st.write(f"**To:** {email_item.get('to')}")
-                        st.write(f"**CC:** {email_item.get('cc')}")
-                        st.write(f"**BCC:** {email_item.get('bcc')}")
-                        st.write(f"**Reply-To:** {email_item.get('reply_to')}")
-                        st.write(f"**Message-ID:** {email_item.get('message_id')}")
-                        st.write(f"**Date:** {email_item.get('date')}")
-                        st.write(f"**Sentiment:** {email_item.get('sentiment')}")
-                        st.write(f"**Summary:** {email_item.get('summary')}")
+                        # st.write(f"**From:** {email_item.get('from')}")  # Commented out for later use
+                        st.markdown(f"**From:** {email_item.get('from')}")
+                        # st.write(f"**To:** {email_item.get('to')}")  # Commented out for later use
+                        st.markdown(f"**To:** {email_item.get('to')}")
+                        # st.write(f"**CC:** {email_item.get('cc')}")  # Commented out for later use
+                        st.markdown(f"**CC:** {email_item.get('cc')}")
+                        # st.write(f"**BCC:** {email_item.get('bcc')}")  # Commented out for later use
+                        st.markdown(f"**BCC:** {email_item.get('bcc')}")
+                        # st.write(f"**Reply-To:** {email_item.get('reply_to')}")  # Commented out for later use
+                        st.markdown(f"**Reply-To:** {email_item.get('reply_to')}")
+                        # st.write(f"**Message-ID:** {email_item.get('message_id')}")  # Commented out for later use
+                        st.markdown(f"**Message-ID:** {email_item.get('message_id')}")
+                        # st.write(f"**Date:** {email_item.get('date')}")  # Commented out for later use
+                        st.markdown(f"**Date:** {email_item.get('date')}")
+                        # st.write(f"**Sentiment:** {email_item.get('sentiment')}")  # Commented out for later use
+                        st.markdown(f"**Sentiment:** {email_item.get('sentiment')}")
+                        # st.write(f"**Summary:** {email_item.get('summary')}")  # Commented out for later use
+                        st.markdown(f"**Summary:** {email_item.get('summary')}")
                         if email_item.get("html_body") and is_content_safe(email_item.get("html_body")):
-                            st.markdown(email_item.get("html_body"), unsafe_allow_html=True)
+                            st.markdown(email_item.get("html_body"), unsafe_allow_html=True)  # Render HTML if safe
                         else:
-                            st.text(email_item.get("plain_body"))
+                            st.text(email_item.get("plain_body"))  # Fallback to plain text
 
-                        # Attachments display and download
+                        # Display and allow downloading attachments
                         attachments = email_item.get("attachments", [])
                         if attachments:
-                            st.write("**Attachments:**")
-                        for idx, att in enumerate(attachments):
+                            # st.write("**Attachments:**")  # Commented out for later use
+                            st.markdown("**Attachments:**")
+                        for att_idx, att in enumerate(attachments):
                             st.download_button(
                                 label=f"Download {att['filename']}",
                                 data=att["content"],
                                 file_name=att["filename"],
                                 mime=att["mime"],
-                                key=f"download_button_{att['filename']}_{idx}"
+                                key=f"download_button_{att['filename']}_{idx}_{att_idx}"
                             )
 
-                        st.markdown("---")
+                        st.markdown("---")  # Separator between emails
         log_debug("Finished displaying threads")
 
         st.header("Export Parsed Data")
@@ -366,9 +466,9 @@ def run_app():
     except Exception as e:
         st.error(f"run_app() encountered an error: {e}")
         import traceback
-        st.write("DEBUG: run_app() exception:")
-        st.write(traceback.format_exc())
+        # st.write("DEBUG: run_app() exception:")  # Commented out for later use
+        # st.write(traceback.format_exc())  # Commented out for later use
         raise
 
 if __name__ == "__main__":
-    run_app()
+    run_app()  # Start the app
