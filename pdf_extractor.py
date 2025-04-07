@@ -25,7 +25,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))    # This is the new syntax
 
 # logging.basicConfig(level=logging.INFO)
 
-# Define a no-op callback function for download buttons
+# Define a no-op callback function for any buttons
 def noop():
     pass
 

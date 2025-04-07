@@ -20,7 +20,13 @@ st.set_page_config(
 st.sidebar.title("Navigation")
 mode = st.sidebar.radio(
     "Select a Mode:",
-    options=["Home", "General Scraper", "PDF Extraction and Processing", "LinkedIn Scraper"]
+    options=[
+        "Home", 
+        "General Scraper", 
+        "PDF Extraction and Processing", 
+        "Email Processing",
+        "LinkedIn Scraper"
+    ]
 )
 
 if mode == "Home":
@@ -52,13 +58,19 @@ elif mode == "General Scraper":
 
 elif mode == "PDF Extraction and Processing":
     # Launch the PDF Extraction UI from pdf_extractor module
-#    print(os.path.dirname(__file__))
-#    sys.path.append(os.path.dirname(__file__))
     import sys
-#    print(sys.path)
     try:
         import pdf_extractor
         pdf_extractor.run_app()
+    except Exception as e:
+        print(f"Error during import or run_app: {e}")  # Print the actual exception
+
+elif mode == "Email Processing":
+    # Launch the Email Processing UI from email_extractor module
+    import sys
+    try:
+        import email_extractor
+        email_extractor.run_app()
     except Exception as e:
         print(f"Error during import or run_app: {e}")  # Print the actual exception
 
@@ -67,3 +79,5 @@ elif mode == "LinkedIn Scraper":
     sys.path.append(os.path.dirname(__file__))
     import linkedin_app_wrapper
     linkedin_app_wrapper.run_app()
+
+

@@ -10,6 +10,8 @@
 
 beautifulsoup4
 camelot-py
+extract-msg
+fpdf
 ghostscript
 httpx
 layoutparser
@@ -35,6 +37,8 @@ tabula-py
 selenium
 streamlit==1.29 
 webdriver-manager
+
+
 
 
       
