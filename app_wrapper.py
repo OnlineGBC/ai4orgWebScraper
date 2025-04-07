@@ -200,6 +200,7 @@ def run_app():
             with open(file_path, "r", encoding="utf-8") as f:
                 all_crawled_text += f.read() + "\n"
         st.session_state.crawled_text = all_crawled_text.strip()
+        st.session_state.data_context = "leadership"  # Set context for chat
 
     # Automatically launch the chat interface if crawled_text exists and is non-empty.
     if "crawled_text" in st.session_state and st.session_state.crawled_text.strip():

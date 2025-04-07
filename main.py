@@ -23,7 +23,7 @@ mode = st.sidebar.radio(
     options=[
         "Home", 
         "General Scraper", 
-        "PDF Extraction and Processing", 
+        "PDF Processing", 
         "Email Processing",
         "LinkedIn Scraper"
     ]
@@ -56,7 +56,7 @@ elif mode == "General Scraper":
     import app_wrapper
     app_wrapper.run_app()
 
-elif mode == "PDF Extraction and Processing":
+elif mode == "PDF Processing":
     # Launch the PDF Extraction UI from pdf_extractor module
     import sys
     try:

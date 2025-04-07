@@ -15,10 +15,13 @@ import tempfile  # For temporary file creation
 import email  # Built-in email parsing library
 from email import policy  # Email parsing policy
 from email.parser import BytesParser  # Parser for email bytes
+import traceback  # For detailed error logging
 
 import extract_msg  # Library to parse .msg files (Outlook format)
 from fpdf import FPDF  # Library to generate PDF reports
 import nltk  # Natural language toolkit for sentiment analysis
+import chat_wrapper  # Import chat tool for integration
+import PyPDF2  # For reading PDF attachments
 from nltk.sentiment.vader import SentimentIntensityAnalyzer  # VADER sentiment analyzer
 
 # Ensure nltk vader_lexicon is downloaded for sentiment analysis
@@ -50,21 +53,6 @@ def summarize_text(text, max_length=200):
     if text and len(text) > max_length:
         return text[:max_length] + "..."
     return text
-
-""" 
-Option 1 below code manages the conversions but display is not great. This is currently disabled
-def is_content_safe(content):
-    if content:
-        try:
-            # Convert content to bytes if it's not already bytes.
-            content_bytes = content if isinstance(content, bytes) else content.encode('utf-8', errors='ignore')
-        except Exception:
-            # If conversion fails, fall back to the original content.
-            content_bytes = content
-        if b"<script" in content_bytes or b"javascript:" in content_bytes:
-            return False
-    return True
-"""
 
 """ 
 Option 2 below code manages the conversions but display should be better. This is currently enabled
@@ -343,10 +331,9 @@ def run_app():
                 # Skip already processed files
                 file_identifier = f"{uploaded_file.name}_{uploaded_file.size}"
                 if file_identifier in st.session_state.processed_files:
-                #    st.info(f"Skipping already processed file: {uploaded_file.name}")
+                    st.info(f"Skipping already processed file: {uploaded_file.name}")
                     continue
                 
-                # st.write(f"DEBUG: Processing file: {uploaded_file.name}")  # Commented out for later use
                 file_bytes = uploaded_file.read()
                 file_name = uploaded_file.name.lower()
                 if not (file_name.endswith(".eml") or file_name.endswith(".msg")):
@@ -367,7 +354,6 @@ def run_app():
                     log_debug(f"Processed file {uploaded_file.name}")
                 except Exception as e:
                     st.error(f"Error processing {uploaded_file.name}: {e}")
-                    # st.write(f"DEBUG: Error processing {uploaded_file.name}: {e}")  # Commented out for later use
 
         # Group emails into threads by normalized subject
         threads = {}
@@ -408,23 +394,14 @@ def run_app():
                 with st.expander(f"Thread: {emails[0].get('subject', 'No Subject')} (Total emails: {len(emails)})"):
                     for idx, email_item in enumerate(emails, start=1):
                         st.markdown(f"#### Email {idx} - {email_item.get('subject')}")
-                        # st.write(f"**From:** {email_item.get('from')}")  # Commented out for later use
                         st.markdown(f"**From:** {email_item.get('from')}")
-                        # st.write(f"**To:** {email_item.get('to')}")  # Commented out for later use
                         st.markdown(f"**To:** {email_item.get('to')}")
-                        # st.write(f"**CC:** {email_item.get('cc')}")  # Commented out for later use
                         st.markdown(f"**CC:** {email_item.get('cc')}")
-                        # st.write(f"**BCC:** {email_item.get('bcc')}")  # Commented out for later use
                         st.markdown(f"**BCC:** {email_item.get('bcc')}")
-                        # st.write(f"**Reply-To:** {email_item.get('reply_to')}")  # Commented out for later use
                         st.markdown(f"**Reply-To:** {email_item.get('reply_to')}")
-                        # st.write(f"**Message-ID:** {email_item.get('message_id')}")  # Commented out for later use
                         st.markdown(f"**Message-ID:** {email_item.get('message_id')}")
-                        # st.write(f"**Date:** {email_item.get('date')}")  # Commented out for later use
                         st.markdown(f"**Date:** {email_item.get('date')}")
-                        # st.write(f"**Sentiment:** {email_item.get('sentiment')}")  # Commented out for later use
                         st.markdown(f"**Sentiment:** {email_item.get('sentiment')}")
-                        # st.write(f"**Summary:** {email_item.get('summary')}")  # Commented out for later use
                         st.markdown(f"**Summary:** {email_item.get('summary')}")
                         if email_item.get("html_body") and is_content_safe(email_item.get("html_body")):
                             st.markdown(email_item.get("html_body"), unsafe_allow_html=True)  # Render HTML if safe
@@ -434,7 +411,6 @@ def run_app():
                         # Display and allow downloading attachments
                         attachments = email_item.get("attachments", [])
                         if attachments:
-                            # st.write("**Attachments:**")  # Commented out for later use
                             st.markdown("**Attachments:**")
                         for att_idx, att in enumerate(attachments):
                             st.download_button(
@@ -463,9 +439,42 @@ def run_app():
                 pdf_file = export_to_pdf(st.session_state.emails_history)
                 st.download_button("Download PDF", data=pdf_file, file_name="emails.pdf", mime="application/pdf")
         log_debug("Finished export options")
+
+        # Prepare email text for chat, including bodies and attachments
+        if st.session_state.emails_history:
+            email_text = ""
+            for email in st.session_state.emails_history:
+                email_text += f"Subject: {email['subject']}\nFrom: {email['from']}\nTo: {email['to']}\nDate: {email['date']}\nBody: {email['plain_body']}\nSummary: {email['summary']}\n"
+                for att in email['attachments']:
+                    if att['mime'] == 'application/pdf' and att['content']:
+                        try:
+                            pdf = PyPDF2.PdfReader(io.BytesIO(att['content']))
+                            att_text = "".join(page.extract_text() for page in pdf.pages if page.extract_text())
+                            email_text += f"Attachment Content [{att['filename']}]: {att_text}\n"
+                        except Exception:
+                            email_text += f"Attachment: {att['filename']} - Recommended for reading\n"
+                    else:
+                        email_text += f"Attachment: {att['filename']} - Recommended for reading\n"
+                email_text += "---\n"
+            if len(email_text.encode('utf-8')) > 10_485_760:  # 10 MB cap
+                email_text = email_text[:10_485_760].rsplit('---', 1)[0] + "---\n"
+                st.warning("Email data exceeds 10 MB. Only the first 10 MB is processed for chat.")
+            st.session_state.email_text = email_text
+            st.session_state.data_context = "email"  # Set context for chat
+
+        if "chat_active" not in st.session_state:
+            st.session_state.chat_active = False  # Initialize chat state
+        # Add chat interface
+        st.header("Chat with Emails")
+        if st.button("Start Chatting") and "email_text" in st.session_state:
+            st.session_state.chat_active = True  # Activate chat
+
+        # Run chat outside any container if activated
+        if st.session_state.chat_active and "email_text" in st.session_state:
+            chat_wrapper.run_chat()  # Launch chat in main body
+
     except Exception as e:
         st.error(f"run_app() encountered an error: {e}")
-        import traceback
         # st.write("DEBUG: run_app() exception:")  # Commented out for later use
         # st.write(traceback.format_exc())  # Commented out for later use
         raise

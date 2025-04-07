@@ -1,8 +1,6 @@
-# This script creates a smart chat tool that helps users dig into a collection of pre-gathered text data (like company info scraped from websites).
-# Imagine you’ve collected a big pile of documents about a company, and you want to quickly find details about its top leaders—like the CEO or CFO—without searching the internet again.
-# The tool breaks that pile into smaller, manageable pieces, uses artificial intelligence (AI) to understand what’s in each piece, and lets you ask follow-up questions.
-# It’s like having a super-smart assistant who knows the documents inside out and can pull out just the right info—like names, job titles, or contact details—based on what you ask.
-# The chat also tries to guess what you mean by tricky abbreviations (like "CSO") by looking at the words around them, making sure it finds the most relevant answers.
+# chat_wrapper.py
+# This script creates a smart chat tool that helps users dig into a collection of pre-gathered text data (like company info scraped from websites or emails).
+# It adapts dynamically to the calling program: for app_wrapper.py, it focuses on leadership info; for email_extractor.py, it analyzes email content including bodies, summaries, and attachments.
 
 import streamlit as st  # Library to build an interactive web app
 import openai  # Library to interact with OpenAI's AI models
@@ -177,37 +175,51 @@ def retrieve_relevant_context(query, vector_store, top_k=10, similarity_threshol
 
 # --- Main Chat Function with RAG Integration ---
 def run_chat():
-    # Secret instructions for the AI on what to focus on
-    system_prompt = (
-        "Act like an experienced marketer and data miner and look for information on senior leadership, "
-        "like the Founder or Co-Founder, CEO, CFO, other C-level officers, or the Board of Directors, along with their names, titles, and social media or other contact details.  "
-        "If senior leadership is not found, get the top 10 team members by title.  Only get information from your RAG and internal data.  Do not search the Internet or any public sources."
-    )
-
-    # Backup question if the user doesn’t ask anything
-    default_query = (
-        "Act like an experienced marketer and data miner and look for information on senior leadership, "
-        "like the Founder or Co-Founder, CEO, CFO, other C-level officers, or the Board of Directors, along with their names, titles, and social media or other contact details.  "
-        "If senior leadership is not found, get the top 10 team members by title.  Only get information from your RAG and internal data.  Do not search the Internet or any public sources."
-    )
+    # Dynamically set system_prompt and default_query based on caller context
+    context = st.session_state.get("data_context", "leadership")  # Default to leadership
+    if context == "email":
+        system_prompt = (
+            "Act as an assistant analyzing email data. Answer questions about subjects, senders, recipients, dates, bodies, summaries, and attachments. Include attachment content if available, or note they’re recommended for reading."
+        )
+        default_query = "Provide a summary of the emails, including key senders, subjects, and notable attachments."
+        data_key = "email_text"
+    else:  # leadership from app_wrapper.py
+        system_prompt = (
+            "Act like an experienced marketer and data miner and look for information on senior leadership, "
+            "like the Founder or Co-Founder, CEO, CFO, other C-level officers, or the Board of Directors, along with their names, titles, and social media or other contact details.  "
+            "If senior leadership is not found, get the top 10 team members by title.  Only get information from your RAG and internal data.  Do not search the Internet or any public sources."
+        )
+        default_query = (
+            "Act like an experienced marketer and data miner and look for information on senior leadership, "
+            "like the Founder or Co-Founder, CEO, CFO, other C-level officers, or the Board of Directors, along with their names, titles, and social media or other contact details.  "
+            "If senior leadership is not found, get the top 10 team members by title.  Only get information from your RAG and internal data.  Do not search the Internet or any public sources."
+        )
+        data_key = "crawled_text"
 
     # Set up a place to store chat messages if it’s the first run
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
 
     # Check if the AI connection is ready
-    if not getattr(OPENAI_CLIENT, "api_key", None):
-        st.error("OPENAI API key is not set in OPENAI_CLIENT.")  # Show error if not
+    try:
+        # Attempt a lightweight API call to verify client readiness
+        OPENAI_CLIENT.models.list()  # This will raise an exception if the client isn't configured
+    except Exception as e:
+        st.error(f"OPENAI_CLIENT not ready: {str(e)}. Please check config.py or API key setup.")
+        # st.write(f"DEBUG: OPENAI_CLIENT attributes: {dir(OPENAI_CLIENT)}")
+        # st.write(f"DEBUG: Exception details: {str(e)}")
+        return  # Halt execution if the client isn’t usable
+    # st.write("DEBUG: OPENAI_CLIENT is ready.")  # Confirm success (remove later)
 
     # Make sure there’s text data to work with
-    if "crawled_text" not in st.session_state or not st.session_state.crawled_text.strip():
-        st.error("No crawled text data available. Please ensure that the crawled_text variable is populated.")
+    if data_key not in st.session_state or not st.session_state[data_key].strip():
+        st.error(f"No {context} data available. Please process data first.")
         return
 
     # Process the text data into chunks and fingerprints if not done yet
     if "vector_store" not in st.session_state:
-        with st.spinner("Processing crawled text for retrieval..."):  # Show a loading sign
-            st.session_state.vector_store = build_vector_store(st.session_state.crawled_text)
+        with st.spinner(f"Processing {context} data for retrieval..."):  # Show a loading sign
+            st.session_state.vector_store = build_vector_store(st.session_state[data_key])
 
     st.markdown("### Follow-up Chat")  # Add a title to the chat section
 

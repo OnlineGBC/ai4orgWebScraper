@@ -176,7 +176,7 @@ def ask_pdf_question(pdf_text, question):
 
 def run_app():
     """Run the Streamlit UI for PDF Extraction, Processing, and Chatbot."""
-    st.title("PDF Extraction and Processing")
+    st.title("PDF Processing")
     st.markdown("Enter a PDF URL or upload a PDF file from your local system. Then choose an output format or interact with the loaded PDF via chat.")
     
     # Conversion options: five choices.

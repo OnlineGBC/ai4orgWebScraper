@@ -29,6 +29,7 @@ pillow
 plotly
 poppler-utils
 pymupdf
+PyPDF2
 pytesseract
 python-docx
 python-dotenv
